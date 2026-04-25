@@ -535,6 +535,34 @@ class StateHistoryCard extends HTMLElement {
     return undefined;
   }
 
+  _textColorForBackground(color) {
+    const rgb = this._parseColor(color);
+    if (!rgb) {
+      return {
+        color: "var(--text-primary-color, #fff)",
+        shadow: "0 1px 1px rgb(0 0 0 / 45%)",
+      };
+    }
+
+    const [red, green, blue] = rgb.map((channel) => {
+      const value = channel / 255;
+      return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+
+    if (luminance > 0.48) {
+      return {
+        color: "#111827",
+        shadow: "0 1px 1px rgb(255 255 255 / 35%)",
+      };
+    }
+
+    return {
+      color: "#ffffff",
+      shadow: "0 1px 1px rgb(0 0 0 / 45%)",
+    };
+  }
+
   _defaultLabelForState(entry, state) {
     const stateKey = String(state).toLowerCase();
     const stateObj = this._hass?.states?.[entry.entity];
@@ -791,12 +819,12 @@ class StateHistoryCard extends HTMLElement {
           max-width: 100%;
           overflow: hidden;
           padding: 0 5px;
-          color: var(--text-primary-color, #fff);
+          color: var(--segment-text-color, var(--text-primary-color, #fff));
           font-size: 11px;
           font-weight: 500;
           line-height: var(--state-history-row-height, 18px);
           text-overflow: ellipsis;
-          text-shadow: 0 1px 1px rgb(0 0 0 / 45%);
+          text-shadow: var(--segment-text-shadow, 0 1px 1px rgb(0 0 0 / 45%));
           white-space: nowrap;
           pointer-events: none;
         }
@@ -970,6 +998,7 @@ class StateHistoryCard extends HTMLElement {
                                 const left = ((interval.start - startMs) / spanMs) * 100;
                                 const width = ((interval.end - interval.start) / spanMs) * 100;
                                 const color = this._colorForState(entry, interval.state, interval.attributes);
+                                const textColor = this._textColorForBackground(color);
                                 const label = this._labelForState(entry, interval.state);
                                 const rawLabel = this._rawLabelForState(entry, interval.state);
                                 return `<div
@@ -988,7 +1017,11 @@ class StateHistoryCard extends HTMLElement {
                                       interval.end
                                     )}, ${this._formatDuration(interval.end - interval.start)}`
                                   )}"
-                                  style="left:${left}%;width:${width}%;--segment-color:${this._escapeAttr(color)}">
+                                  style="left:${left}%;width:${width}%;--segment-color:${this._escapeAttr(
+                                    color
+                                  )};--segment-text-color:${this._escapeAttr(textColor.color)};--segment-text-shadow:${this._escapeAttr(
+                                    textColor.shadow
+                                  )}">
                                   ${showStateLabels ? `<span class="segment-label">${this._escape(label)}</span>` : ""}
                                 </div>`;
                               })
@@ -1517,7 +1550,7 @@ class StateHistoryCardEditor extends HTMLElement {
 
     this._entityDraft = this._entityConfigs(config.entities || []);
     this._colorDraft = this._mapEntries(config.state_colors || config.colors || {});
-    this._colorStopDraft = this._mapEntries(config.color_stops || {});
+    this._colorStopDraft = this._sortColorStopEntries(this._mapEntries(config.color_stops || {}));
     this._labelDraft = this._mapEntries(this._labelsEditable(config) ? config.state_labels || config.labels || {} : {});
     this._render();
   }
@@ -1886,7 +1919,7 @@ class StateHistoryCardEditor extends HTMLElement {
     entries[index] = entries[index] || ["", ""];
     entries[index][field === "key" ? 0 : 1] = value;
     this._updateColorPreview(type, index, entries[index][1]);
-    this._configChanged({ ...this._config, [configKey]: this._entriesToMap(entries) }, false, debounce);
+    this._configChanged({ ...this._config, [configKey]: this._entriesToMap(this._mapDraft(type)) }, false, debounce);
   }
 
   _addMapEntry(type) {
@@ -1933,13 +1966,25 @@ class StateHistoryCardEditor extends HTMLElement {
   }
 
   _emitConfigChanged() {
+    const config = this._normalizedConfig(this._config);
     this.dispatchEvent(
       new CustomEvent("config-changed", {
-        detail: { config: this._config },
+        detail: { config },
         bubbles: true,
         composed: true,
       })
     );
+  }
+
+  _normalizedConfig(config) {
+    if (!config?.color_stops || typeof config.color_stops !== "object" || Array.isArray(config.color_stops)) {
+      return config;
+    }
+
+    return {
+      ...config,
+      color_stops: this._entriesToMap(this._sortColorStopEntries(Object.entries(config.color_stops))),
+    };
   }
 
   _updateColorPreview(type, index, value) {
@@ -1960,6 +2005,20 @@ class StateHistoryCardEditor extends HTMLElement {
     if (type === "color") return this._colorDraft;
     if (type === "stop") return this._colorStopDraft;
     return this._labelDraft;
+  }
+
+  _sortColorStopEntries(entries) {
+    return [...entries].sort(([left], [right]) => {
+      const leftNumber = Number(left);
+      const rightNumber = Number(right);
+      const leftFinite = Number.isFinite(leftNumber);
+      const rightFinite = Number.isFinite(rightNumber);
+
+      if (leftFinite && rightFinite) return leftNumber - rightNumber;
+      if (leftFinite) return -1;
+      if (rightFinite) return 1;
+      return String(left).localeCompare(String(right));
+    });
   }
 
   _entityConfigs(entities) {
