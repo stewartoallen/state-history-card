@@ -321,7 +321,10 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _numericValueForColor(entry, state) {
-    const value = Number(state);
+    const raw = String(state ?? "").trim();
+    if (!raw || ["unknown", "unavailable", "none", "null", "nan"].includes(raw.toLowerCase())) return NaN;
+
+    const value = Number(raw);
     if (!Number.isFinite(value)) return NaN;
 
     const decimals = this._decimals(entry);
