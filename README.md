@@ -98,7 +98,10 @@ entities:
 | `legend` | string | `on` | `on`, `off`, `left`, `center`, or `right`. `on` and `left` are synonyms. |
 | `timestamps` | string | `on` | Timeline labels: `on` or `off`. Midnight marks show a weekday or date instead of `12:00 AM`. |
 | `state_colors` | object | `{}` | Global state-to-color map. Keys may match raw state, display label, or `|` separated aliases. |
-| `state_labels` | object/string | `{}` | Global raw-state/display-state-to-label map. Keys may use `|` aliases. |
+| `state_labels` | object | `{}` | Global raw-state/display-state-to-label map. Keys may use `|` aliases. |
+| `entities[].mode` | string | `state` | Set to `numeric` to color numeric sensor history from `color_stops`. |
+| `entities[].color_stops` | object | none | Numeric value-to-color stops. Colors between stops are interpolated. |
+| `entities[].label_action` | object/string | none | Set to `toggle` or `{ action: toggle }` to make the left entity label toggle the entity. |
 | `entities[].state_colors` | object | none | Per-entity state color map. Overrides global colors for that entity. |
 | `entities[].state_labels` | object | none | Per-entity state label map. Overrides global labels for that entity. |
 | `show_legend` | boolean | `true` | Legacy alias. Set to `false` to hide the legend. |
@@ -137,6 +140,40 @@ entities:
       cooling: "#0284c7"
       heating: "#dc2626"
 ```
+
+## Label Actions
+
+For entities that support toggling, the left entity label can call `homeassistant.toggle`:
+
+```yaml
+type: custom:state-history-card
+entities:
+  - entity: light.office
+    name: Office
+    label_action:
+      action: toggle
+```
+
+The history bar itself remains dedicated to hover/touch history details.
+
+## Numeric Color Stops
+
+Numeric sensors can render as interpolated color bands:
+
+```yaml
+type: custom:state-history-card
+entities:
+  - entity: sensor.office_temperature
+    name: Office temp
+    mode: numeric
+    color_stops:
+      60: "#2563eb"
+      68: "#22c55e"
+      76: "#facc15"
+      82: "#dc2626"
+```
+
+Numeric rows are omitted from the discrete state legend.
 
 ## Visual Editor
 

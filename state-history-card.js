@@ -32,6 +32,8 @@ class StateHistoryCard extends HTMLElement {
     };
     this.shadowRoot.addEventListener("pointermove", (event) => this._handlePointerMove(event));
     this.shadowRoot.addEventListener("pointerdown", (event) => this._handlePointerDown(event));
+    this.shadowRoot.addEventListener("click", (event) => this._handleClick(event));
+    this.shadowRoot.addEventListener("keydown", (event) => this._handleKeyDown(event));
     this.shadowRoot.addEventListener("pointerleave", () => {
       if (!this._tooltipPinned) this._hideTooltip();
     });
@@ -184,6 +186,11 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _colorForState(entry, state) {
+    if (this._isNumericEntry(entry)) {
+      const numericColor = this._numericColorForState(entry, state);
+      if (numericColor) return numericColor;
+    }
+
     const entityColors = entry.state_colors || entry.colors || {};
     const globalColors = this._config.state_colors || this._config.colors || {};
     const candidates = this._stateLookupCandidates(entry, state);
@@ -248,6 +255,74 @@ class StateHistoryCard extends HTMLElement {
 
     const normalized = value.trim().toLowerCase();
     return !(normalized === "off" || normalized === "false" || normalized === "none" || normalized === "hidden");
+  }
+
+  _isNumericEntry(entry) {
+    return String(entry.mode || "").trim().toLowerCase() === "numeric" || entry.color_stops;
+  }
+
+  _numericColorForState(entry, state) {
+    const value = Number(state);
+    const stops = this._colorStops(entry.color_stops);
+    if (!Number.isFinite(value) || stops.length === 0) return undefined;
+
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    for (let index = 1; index < stops.length; index += 1) {
+      const high = stops[index];
+      const low = stops[index - 1];
+      if (value > high.value) continue;
+
+      const ratio = (value - low.value) / (high.value - low.value);
+      return this._interpolateColor(low.color, high.color, ratio);
+    }
+
+    return undefined;
+  }
+
+  _colorStops(stops) {
+    const entries = Array.isArray(stops)
+      ? stops.map((stop) => [stop.value, stop.color])
+      : Object.entries(stops || {});
+
+    return entries
+      .map(([value, color]) => ({
+        value: Number(value),
+        color: String(color || "").trim(),
+      }))
+      .filter((stop) => Number.isFinite(stop.value) && this._parseColor(stop.color))
+      .sort((a, b) => a.value - b.value);
+  }
+
+  _interpolateColor(start, end, ratio) {
+    const from = this._parseColor(start);
+    const to = this._parseColor(end);
+    if (!from || !to) return ratio < 0.5 ? start : end;
+
+    const clamped = Math.min(1, Math.max(0, ratio));
+    const channels = from.map((value, index) => Math.round(value + (to[index] - value) * clamped));
+    return `rgb(${channels[0]} ${channels[1]} ${channels[2]})`;
+  }
+
+  _parseColor(color) {
+    const value = String(color || "").trim();
+    const shortHex = value.match(/^#([0-9a-f]{3})$/i);
+    if (shortHex) {
+      return shortHex[1].split("").map((part) => parseInt(part + part, 16));
+    }
+
+    const hex = value.match(/^#([0-9a-f]{6})$/i);
+    if (hex) {
+      return [0, 2, 4].map((offset) => parseInt(hex[1].slice(offset, offset + 2), 16));
+    }
+
+    const rgb = value.match(/^rgb\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})\s*\)$/i);
+    if (rgb) {
+      return rgb.slice(1).map((part) => Math.min(255, Math.max(0, Number(part))));
+    }
+
+    return undefined;
   }
 
   _defaultLabelForState(entry, state) {
@@ -423,12 +498,37 @@ class StateHistoryCard extends HTMLElement {
         }
 
         .name {
+          appearance: none;
           color: var(--primary-text-color);
+          font: inherit;
           font-size: 13px;
           line-height: 18px;
           overflow: hidden;
+          border: 0;
+          padding: 0;
+          background: transparent;
           text-overflow: ellipsis;
+          text-align: left;
           white-space: nowrap;
+        }
+
+        .name[data-action] {
+          cursor: pointer;
+          text-decoration: underline;
+          text-decoration-color: var(--secondary-text-color);
+          text-underline-offset: 2px;
+        }
+
+        .name[data-action]:hover,
+        .name[data-action]:focus-visible {
+          color: var(--primary-color);
+          outline: 0;
+        }
+
+        .name:disabled {
+          color: var(--primary-text-color);
+          cursor: default;
+          opacity: 1;
         }
 
         .track {
@@ -629,9 +729,16 @@ class StateHistoryCard extends HTMLElement {
                     .map(
                       ({ entry, intervals }) => `
                         <div class="row">
-                          <div class="name" title="${this._escape(this._displayName(entry))}">
+                          <button
+                            class="name"
+                            title="${this._escape(this._displayName(entry))}"
+                            data-entity-id="${this._escapeAttr(entry.entity)}"
+                            ${this._labelAction(entry) ? `data-action="${this._escapeAttr(this._labelAction(entry))}"` : ""}
+                            ${this._labelAction(entry) ? "" : "disabled"}
+                            type="button"
+                          >
                             ${this._escape(this._displayName(entry))}
-                          </div>
+                          </button>
                           <div class="track">
                             ${intervals
                               .map((interval) => {
@@ -718,6 +825,27 @@ class StateHistoryCard extends HTMLElement {
     return this._positionValue(value, "left");
   }
 
+  _labelAction(entry) {
+    const action = entry.label_action;
+    if (!action) return "";
+
+    const value = typeof action === "string" ? action : action.action;
+    return String(value || "").trim().toLowerCase() === "toggle" ? "toggle" : "";
+  }
+
+  async _performLabelAction(target) {
+    const action = target.dataset.action;
+    const entityId = target.dataset.entityId;
+    if (!this._hass || action !== "toggle" || !entityId) return;
+
+    try {
+      await this._hass.callService("homeassistant", "toggle", { entity_id: entityId });
+    } catch (err) {
+      this._error = err?.message || String(err);
+      this._render();
+    }
+  }
+
   _labelMode() {
     const value = String(this._config.timestamps || "on").trim().toLowerCase();
     if (value === "off" || value === "false" || value === "none" || value === "hidden") return "off";
@@ -744,6 +872,8 @@ class StateHistoryCard extends HTMLElement {
   _legendStates(rows) {
     const seen = new Map();
     for (const { entry, intervals } of rows) {
+      if (this._isNumericEntry(entry)) continue;
+
       for (const interval of intervals) {
         if (!seen.has(interval.state)) {
           seen.set(interval.state, {
@@ -942,6 +1072,24 @@ class StateHistoryCard extends HTMLElement {
       const availableWidth = Math.max(0, segment.clientWidth - 8);
       label.dataset.hidden = label.scrollWidth > availableWidth ? "true" : "false";
     }
+  }
+
+  _handleClick(event) {
+    const target = event.target.closest?.(".name[data-action]");
+    if (!target) return;
+
+    event.stopPropagation();
+    this._performLabelAction(target);
+  }
+
+  _handleKeyDown(event) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+
+    const target = event.target.closest?.(".name[data-action]");
+    if (!target) return;
+
+    event.preventDefault();
+    this._performLabelAction(target);
   }
 
   _handlePointerDown(event) {
