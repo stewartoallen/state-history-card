@@ -51,7 +51,7 @@ class StateHistoryCard extends HTMLElement {
       hours_to_show: 24,
       refresh_interval: 300,
       legend: "on",
-      label: "on",
+      timestamps: "on",
       title_position: "left",
       title_size: undefined,
       show_legend: true,
@@ -197,8 +197,8 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _labelForState(entry, state) {
-    const entityLabels = entry.state_labels || entry.labels || {};
-    const globalLabels = this._config.state_labels || this._config.labels || {};
+    const entityLabels = this._asMap(entry.state_labels || entry.labels);
+    const globalLabels = this._asMap(this._config.state_labels || this._config.labels);
     const candidates = this._stateLookupCandidates(entry, state);
     const configured =
       this._lookupMappedValue(entityLabels, candidates) ||
@@ -221,7 +221,7 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _lookupMappedValue(map, candidates) {
-    for (const [key, value] of Object.entries(map || {})) {
+    for (const [key, value] of Object.entries(this._asMap(map))) {
       const aliases = String(key)
         .split("|")
         .map((item) => item.trim())
@@ -235,6 +235,19 @@ class StateHistoryCard extends HTMLElement {
     }
 
     return undefined;
+  }
+
+  _asMap(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return value;
+  }
+
+  _stateLabelsVisible() {
+    const value = this._config.labels;
+    if (typeof value !== "string") return true;
+
+    const normalized = value.trim().toLowerCase();
+    return !(normalized === "off" || normalized === "false" || normalized === "none" || normalized === "hidden");
   }
 
   _defaultLabelForState(entry, state) {
@@ -345,6 +358,7 @@ class StateHistoryCard extends HTMLElement {
     const titleSize = this._titleSize();
     const labelMode = this._labelMode();
     const axisTicks = labelMode === "on" ? this._axisTicks(startMs, endMs) : [];
+    const showStateLabels = this._stateLabelsVisible();
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -641,7 +655,7 @@ class StateHistoryCard extends HTMLElement {
                                     )}, ${this._formatDuration(interval.end - interval.start)}`
                                   )}"
                                   style="left:${left}%;width:${width}%;--segment-color:${this._escapeAttr(color)}">
-                                  <span class="segment-label">${this._escape(label)}</span>
+                                  ${showStateLabels ? `<span class="segment-label">${this._escape(label)}</span>` : ""}
                                 </div>`;
                               })
                               .join("")}
@@ -705,7 +719,7 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _labelMode() {
-    const value = String(this._config.label || "on").trim().toLowerCase();
+    const value = String(this._config.timestamps || "on").trim().toLowerCase();
     if (value === "off" || value === "false" || value === "none" || value === "hidden") return "off";
     return "on";
   }
@@ -1030,7 +1044,7 @@ class StateHistoryCardEditor extends HTMLElement {
 
     this._entityDraft = this._entityConfigs(config.entities || []);
     this._colorDraft = this._mapEntries(config.state_colors || config.colors || {});
-    this._labelDraft = this._mapEntries(config.state_labels || config.labels || {});
+    this._labelDraft = this._mapEntries(this._labelsEditable(config) ? config.state_labels || config.labels || {} : {});
     this._render();
   }
 
@@ -1199,10 +1213,17 @@ class StateHistoryCardEditor extends HTMLElement {
               </select>
             </label>
             <label>
-              Labels
-              <select data-field="label">
-                ${this._option("on", "On", config.label || "on")}
-                ${this._option("off", "Off", config.label)}
+              Time labels
+              <select data-field="timestamps">
+                ${this._option("on", "On", config.timestamps || "on")}
+                ${this._option("off", "Off", config.timestamps)}
+              </select>
+            </label>
+            <label>
+              State labels
+              <select data-field="labels">
+                ${this._option("", "On", this._inlineLabelsValue(config))}
+                ${this._option("off", "Off", this._inlineLabelsValue(config))}
               </select>
             </label>
           </div>
@@ -1341,6 +1362,7 @@ class StateHistoryCardEditor extends HTMLElement {
 
   _updateField(field, value, type, debounce = false) {
     const config = { ...this._config };
+
     if (value === "" && field !== "title") {
       delete config[field];
     } else if (field === "title" && value === "") {
@@ -1445,7 +1467,15 @@ class StateHistoryCardEditor extends HTMLElement {
   }
 
   _mapEntries(map) {
-    return Object.entries(map || {});
+    return Object.entries(map && typeof map === "object" && !Array.isArray(map) ? map : {});
+  }
+
+  _labelsEditable(config) {
+    return !config.state_labels || typeof config.state_labels === "object";
+  }
+
+  _inlineLabelsValue(config) {
+    return typeof config.labels === "string" && config.labels.trim().toLowerCase() === "off" ? "off" : "";
   }
 
   _entriesToMap(entries) {
