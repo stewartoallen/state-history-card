@@ -107,6 +107,7 @@ entities:
 | `entities[].null_color` | string | global/theme background | Per-entity color for missing or invalid numeric values. |
 | `entities[].decimals` | number | global/none | Per-entity decimal places for numeric color calculation and display labels. |
 | `entities[].label_action` | object/string | auto | Set to `toggle` or `{ action: toggle }` to make the left entity label toggle the entity. Set to `off` to disable. |
+| `entities[].more_info_entity` | string | row entity | Entity to open for label more-info. Useful when a sensor row should open a related thermostat. |
 | `entities[].state_colors` | object | none | Per-entity state color map. Overrides global colors for that entity. |
 | `entities[].state_labels` | object | none | Per-entity state label map. Overrides global labels for that entity. |
 | `show_legend` | boolean | `true` | Legacy alias. Set to `false` to hide the legend. |
@@ -158,6 +159,15 @@ entities:
 ```
 
 Use `label_action: off` to disable the short-click toggle for an entity. Use `label_action: toggle` to enable it for another domain.
+
+For entities without a short-click action, clicking the label opens more-info. Set `more_info_entity` to open a related control entity instead of the displayed history entity:
+
+```yaml
+entities:
+  - entity: sensor.t6_pro_z_wave_programmable_thermostat_with_smartstart_air_temperature
+    name: thermostat
+    more_info_entity: climate.t6_pro_z_wave_programmable_thermostat_with_smartstart
+```
 
 The history bar itself remains dedicated to hover/touch history details.
 

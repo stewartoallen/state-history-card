@@ -606,8 +606,13 @@ class StateHistoryCard extends HTMLElement {
         }
 
         .name[data-action]:hover,
-        .name[data-action]:focus-visible {
+        .name[data-action]:focus-visible,
+        .name[data-more-info]:focus-visible {
           color: var(--primary-color);
+          outline: 0;
+        }
+
+        .name:focus {
           outline: 0;
         }
 
@@ -816,6 +821,7 @@ class StateHistoryCard extends HTMLElement {
                             class="name"
                             title="${this._escape(this._displayName(entry))}"
                             data-entity-id="${this._escapeAttr(entry.entity)}"
+                            data-more-info-entity="${this._escapeAttr(this._moreInfoEntity(entry))}"
                             data-more-info="true"
                             ${labelAction ? `data-action="${this._escapeAttr(labelAction)}"` : ""}
                             style="--label-action-color:${this._escapeAttr(labelActionColor)}"
@@ -926,9 +932,18 @@ class StateHistoryCard extends HTMLElement {
     return String(value || "").trim().toLowerCase() === "toggle" ? "toggle" : "";
   }
 
+  _moreInfoEntity(entry) {
+    return entry.more_info_entity || entry.more_info || entry.entity;
+  }
+
   async _performLabelAction(target) {
     const action = target.dataset.action;
     const entityId = target.dataset.entityId;
+    if (!action) {
+      this._showMoreInfo(target.dataset.moreInfoEntity || entityId);
+      return;
+    }
+
     if (!this._hass || action !== "toggle" || !entityId) return;
 
     try {
@@ -949,6 +964,10 @@ class StateHistoryCard extends HTMLElement {
         composed: true,
       })
     );
+  }
+
+  _releaseLabelFocus(target) {
+    if (typeof target?.blur === "function") target.blur();
   }
 
   _labelMode() {
@@ -1186,10 +1205,12 @@ class StateHistoryCard extends HTMLElement {
     event.stopPropagation();
     if (this._labelLongPressed) {
       this._labelLongPressed = false;
+      this._releaseLabelFocus(target);
       return;
     }
 
     this._performLabelAction(target);
+    this._releaseLabelFocus(target);
   }
 
   _handleKeyDown(event) {
@@ -1202,8 +1223,9 @@ class StateHistoryCard extends HTMLElement {
     if (event.key === "Enter") {
       this._performLabelAction(target);
     } else {
-      this._showMoreInfo(target.dataset.entityId);
+      this._showMoreInfo(target.dataset.moreInfoEntity || target.dataset.entityId);
     }
+    this._releaseLabelFocus(target);
   }
 
   _handlePointerDown(event) {
@@ -1237,7 +1259,8 @@ class StateHistoryCard extends HTMLElement {
       if (this._labelPressTarget !== target) return;
 
       this._labelLongPressed = true;
-      this._showMoreInfo(target.dataset.entityId);
+      this._showMoreInfo(target.dataset.moreInfoEntity || target.dataset.entityId);
+      this._releaseLabelFocus(target);
       this._clearLabelPress(false);
       setTimeout(() => {
         this._labelLongPressed = false;
