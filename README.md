@@ -99,6 +99,7 @@ entities:
 | `timestamps` | string | `on` | Timeline labels: `on` or `off`. Midnight marks show a weekday or date instead of `12:00 AM`. |
 | `state_colors` | object | `{}` | Global state-to-color map. Keys may match raw state, display label, or `|` separated aliases. |
 | `state_labels` | object | `{}` | Global raw-state/display-state-to-label map. Keys may use `|` aliases. |
+| `color_source` | string | `state` | Global color source for clickable label underlines. Use `light` to use live light attributes when available. |
 | `color_stops` | object | none | Global numeric value-to-color stops. Entity-level `color_stops` override this. |
 | `null_color` | string | theme background | Color for numeric rows when a value is missing, invalid, or the row has no data. |
 | `decimals` | number | none | Global decimal places for numeric color calculation and display labels. Raw values remain visible in hover details. |
@@ -110,6 +111,7 @@ entities:
 | `entities[].more_info_entity` | string | row entity | Entity to open for label more-info. Useful when a sensor row should open a related thermostat. |
 | `entities[].state_colors` | object | none | Per-entity state color map. Overrides global colors for that entity. |
 | `entities[].state_labels` | object | none | Per-entity state label map. Overrides global labels for that entity. |
+| `entities[].color_source` | string | global/`state` | Per-entity clickable label underline color source. Use `light` for live light attribute color or `state` for graph state colors. |
 | `show_legend` | boolean | `true` | Legacy alias. Set to `false` to hide the legend. |
 
 The card also accepts `colors` as an alias for `state_colors` and `labels` as an alias for `state_labels`. Set `labels: "off"` to hide inline state labels.
@@ -201,6 +203,22 @@ entities:
 Numeric rows are omitted from the discrete state legend.
 
 When global `color_stops` are configured, `sensor`, `number`, and `input_number` entities that look numeric use the stops automatically. Use `mode: state` to force a sensor to use discrete state colors.
+
+## Light Color Source
+
+Light rows can use their current reported color for clickable label underlines:
+
+```yaml
+type: custom:state-history-card
+color_source: state
+entities:
+  - entity: light.corner
+    color_source: light
+  - entity: sensor.office_temperature
+    mode: numeric
+```
+
+Set `color_source: light` globally if most label underlines should use live light colors, then override non-light or discrete rows with `color_source: state`. The history graph itself continues to use `state_colors` or built-in state defaults.
 
 ## Visual Editor
 

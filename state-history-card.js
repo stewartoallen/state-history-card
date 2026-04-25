@@ -77,6 +77,7 @@ class StateHistoryCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._config) return;
+    this._syncLabelActionColors();
 
     if (this._entityIds().length === 0) {
       if (this._lastStateSignature !== "empty") {
@@ -103,6 +104,8 @@ class StateHistoryCard extends HTMLElement {
     if (stateSignature !== this._lastStateSignature) {
       this._lastStateSignature = stateSignature;
       this._render();
+    } else {
+      this._syncLabelActionColors();
     }
   }
 
@@ -121,17 +124,33 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _stateSignature() {
-    return this._entityIds()
-      .map((entityId) => {
+    return this._entityConfigs()
+      .filter((entry) => entry.entity)
+      .map((entry) => {
+        const entityId = entry.entity;
         const stateObj = this._hass?.states?.[entityId];
         return [
           entityId,
           stateObj?.state || "",
           stateObj?.last_changed || "",
           stateObj?.last_updated || "",
+          this._liveAttributeSignature(entry, stateObj),
         ].join(":");
       })
       .join("|");
+  }
+
+  _liveAttributeSignature(entry, stateObj) {
+    if (!stateObj || this._colorSource(entry) !== "light") return "";
+
+    const attributes = stateObj.attributes || {};
+    return JSON.stringify({
+      rgb_color: attributes.rgb_color || null,
+      hs_color: attributes.hs_color || null,
+      xy_color: attributes.xy_color || null,
+      color_temp_kelvin: attributes.color_temp_kelvin || null,
+      color_temp: attributes.color_temp || null,
+    });
   }
 
   async _fetchHistory() {
@@ -191,7 +210,7 @@ class StateHistoryCard extends HTMLElement {
     return stateObj?.attributes?.friendly_name || entry.entity;
   }
 
-  _colorForState(entry, state) {
+  _colorForState(entry, state, attributes = {}) {
     if (this._isNumericEntry(entry)) {
       const numericColor = this._numericColorForState(entry, state);
       if (numericColor) return numericColor;
@@ -207,6 +226,105 @@ class StateHistoryCard extends HTMLElement {
       DEFAULT_STATE_COLORS[stateKey];
 
     return color || this._fallbackColor(state);
+  }
+
+  _colorSource(entry) {
+    return String(entry.color_source || this._config.color_source || "state").trim().toLowerCase();
+  }
+
+  _lightColorForState(state, attributes = {}) {
+    if (String(state).toLowerCase() !== "on") return undefined;
+
+    const rgb = this._lightRgbColor(attributes);
+    return rgb ? `rgb(${rgb[0]} ${rgb[1]} ${rgb[2]})` : undefined;
+  }
+
+  _lightRgbColor(attributes = {}) {
+    if (Array.isArray(attributes.rgb_color) && attributes.rgb_color.length >= 3) {
+      const rgb = attributes.rgb_color.slice(0, 3).map((value) => Number(value));
+      if (rgb.every((value) => Number.isFinite(value))) return rgb.map((value) => Math.min(255, Math.max(0, Math.round(value))));
+    }
+
+    if (Array.isArray(attributes.hs_color) && attributes.hs_color.length >= 2) {
+      return this._hsvToRgb(Number(attributes.hs_color[0]), Number(attributes.hs_color[1]), 100);
+    }
+
+    if (Array.isArray(attributes.xy_color) && attributes.xy_color.length >= 2) {
+      return this._xyToRgb(Number(attributes.xy_color[0]), Number(attributes.xy_color[1]));
+    }
+
+    const kelvin = Number(attributes.color_temp_kelvin);
+    if (Number.isFinite(kelvin)) return this._kelvinToRgb(kelvin);
+
+    const mireds = Number(attributes.color_temp);
+    if (Number.isFinite(mireds) && mireds > 0) return this._kelvinToRgb(1000000 / mireds);
+
+    return undefined;
+  }
+
+  _hsvToRgb(hue, saturation, value) {
+    if (!Number.isFinite(hue) || !Number.isFinite(saturation) || !Number.isFinite(value)) return undefined;
+
+    const h = ((hue % 360) + 360) % 360;
+    const s = Math.min(100, Math.max(0, saturation)) / 100;
+    const v = Math.min(100, Math.max(0, value)) / 100;
+    const c = v * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = v - c;
+    const [r, g, b] =
+      h < 60 ? [c, x, 0] :
+      h < 120 ? [x, c, 0] :
+      h < 180 ? [0, c, x] :
+      h < 240 ? [0, x, c] :
+      h < 300 ? [x, 0, c] :
+      [c, 0, x];
+
+    return [r, g, b].map((channel) => Math.round((channel + m) * 255));
+  }
+
+  _kelvinToRgb(kelvin) {
+    const temperature = Math.min(40000, Math.max(1000, kelvin)) / 100;
+    let red;
+    let green;
+    let blue;
+
+    if (temperature <= 66) {
+      red = 255;
+      green = 99.4708025861 * Math.log(temperature) - 161.1195681661;
+      blue = temperature <= 19 ? 0 : 138.5177312231 * Math.log(temperature - 10) - 305.0447927307;
+    } else {
+      red = 329.698727446 * ((temperature - 60) ** -0.1332047592);
+      green = 288.1221695283 * ((temperature - 60) ** -0.0755148492);
+      blue = 255;
+    }
+
+    return [red, green, blue].map((channel) => Math.round(Math.min(255, Math.max(0, channel))));
+  }
+
+  _xyToRgb(x, y) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || y === 0) return undefined;
+
+    const brightness = 1;
+    const z = 1 - x - y;
+    const bigY = brightness;
+    const bigX = (bigY / y) * x;
+    const bigZ = (bigY / y) * z;
+    let red = bigX * 1.656492 - bigY * 0.354851 - bigZ * 0.255038;
+    let green = -bigX * 0.707196 + bigY * 1.655397 + bigZ * 0.036152;
+    let blue = bigX * 0.051713 - bigY * 0.121364 + bigZ * 1.01153;
+
+    red = red <= 0.0031308 ? 12.92 * red : 1.055 * (red ** (1 / 2.4)) - 0.055;
+    green = green <= 0.0031308 ? 12.92 * green : 1.055 * (green ** (1 / 2.4)) - 0.055;
+    blue = blue <= 0.0031308 ? 12.92 * blue : 1.055 * (blue ** (1 / 2.4)) - 0.055;
+
+    const max = Math.max(red, green, blue);
+    if (max > 1) {
+      red /= max;
+      green /= max;
+      blue /= max;
+    }
+
+    return [red, green, blue].map((channel) => Math.round(Math.min(255, Math.max(0, channel * 255))));
   }
 
   _labelForState(entry, state) {
@@ -316,10 +434,20 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _labelActionColor(entry, intervals) {
+    const stateObj = this._hass?.states?.[entry.entity];
+    if (this._colorSource(entry) === "light") {
+      const lightColor = this._lightColorForState(stateObj?.state, stateObj?.attributes || {});
+      if (lightColor) return lightColor;
+    }
+
+    if (stateObj) {
+      return this._colorForState(entry, stateObj.state, stateObj.attributes || {});
+    }
+
     const current = intervals[intervals.length - 1];
     if (!current) return this._trackBackground(entry);
 
-    return this._colorForState(entry, current.state);
+    return this._colorForState(entry, current.state, current.attributes || {});
   }
 
   _formatNumericState(entry, state) {
@@ -451,6 +579,7 @@ class StateHistoryCard extends HTMLElement {
       .map((item) => ({
         state: item.state,
         changed: Date.parse(item.last_changed || item.last_updated),
+        attributes: item.attributes || {},
       }))
       .filter((item) => item.state !== undefined && Number.isFinite(item.changed))
       .sort((a, b) => a.changed - b.changed);
@@ -463,8 +592,10 @@ class StateHistoryCard extends HTMLElement {
         Number.isFinite(currentChanged) &&
         (!lastPoint || lastPoint.state !== current.state || lastPoint.changed !== currentChanged)
       ) {
-        points.push({ state: current.state, changed: currentChanged });
+        points.push({ state: current.state, changed: currentChanged, attributes: current.attributes || {} });
         points.sort((a, b) => a.changed - b.changed);
+      } else if (lastPoint && lastPoint.state === current.state) {
+        lastPoint.attributes = current.attributes || lastPoint.attributes || {};
       }
     }
 
@@ -479,14 +610,19 @@ class StateHistoryCard extends HTMLElement {
       }
       intervals.push({
         state: active.state,
+        attributes: active.attributes || {},
         start: Math.max(startMs, active.changed),
         end: Math.min(endMs, point.changed),
       });
       active = point;
     }
 
+    const currentAttributes =
+      current && current.state === active.state ? current.attributes || active.attributes || {} : active.attributes || {};
+
     intervals.push({
       state: active.state,
+      attributes: currentAttributes,
       start: Math.max(startMs, active.changed),
       end: endMs,
     });
@@ -833,7 +969,7 @@ class StateHistoryCard extends HTMLElement {
                               .map((interval) => {
                                 const left = ((interval.start - startMs) / spanMs) * 100;
                                 const width = ((interval.end - interval.start) / spanMs) * 100;
-                                const color = this._colorForState(entry, interval.state);
+                                const color = this._colorForState(entry, interval.state, interval.attributes);
                                 const label = this._labelForState(entry, interval.state);
                                 const rawLabel = this._rawLabelForState(entry, interval.state);
                                 return `<div
@@ -947,6 +1083,7 @@ class StateHistoryCard extends HTMLElement {
 
     try {
       await this._hass.callService("homeassistant", "toggle", { entity_id: entityId });
+      this._render();
     } catch (err) {
       this._error = err?.message || String(err);
       this._render();
@@ -1002,7 +1139,7 @@ class StateHistoryCard extends HTMLElement {
           seen.set(interval.state, {
             state: interval.state,
             label: this._labelForState(entry, interval.state),
-            color: this._colorForState(entry, interval.state),
+            color: this._colorForState(entry, interval.state, interval.attributes),
           });
         }
       }
@@ -1184,7 +1321,25 @@ class StateHistoryCard extends HTMLElement {
     this._labelFrame = requestAnimationFrame(() => {
       this._labelFrame = undefined;
       this._syncSegmentLabels();
+      this._syncLabelActionColors();
     });
+  }
+
+  _syncLabelActionColors() {
+    if (!this.shadowRoot) return;
+
+    for (const button of this.shadowRoot.querySelectorAll(".name[data-entity-id]")) {
+      const entry = this._entityConfigs().find((item) => item.entity === button.dataset.entityId);
+      const stateObj = this._hass?.states?.[button.dataset.entityId];
+      if (!entry || !stateObj) continue;
+
+      const color =
+        this._colorSource(entry) === "light"
+          ? this._lightColorForState(stateObj.state, stateObj.attributes || {}) ||
+            this._colorForState(entry, stateObj.state, stateObj.attributes || {})
+          : this._colorForState(entry, stateObj.state, stateObj.attributes || {});
+      button.style.setProperty("--label-action-color", color);
+    }
   }
 
   _syncSegmentLabels() {
