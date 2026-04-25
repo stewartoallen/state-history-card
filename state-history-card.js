@@ -266,11 +266,25 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _isNumericEntry(entry) {
-    if (String(entry.mode || "").trim().toLowerCase() === "numeric" || entry.color_stops) return true;
+    const mode = String(entry.mode || "").trim().toLowerCase();
+    if (mode === "state" || mode === "discrete") return false;
+    if (mode === "numeric" || entry.color_stops) return true;
     if (!this._hasColorStops(this._config.color_stops)) return false;
 
     const domain = entry.entity?.split(".")[0];
-    return ["sensor", "number", "input_number"].includes(domain);
+    if (domain === "number" || domain === "input_number") return true;
+    if (domain !== "sensor") return false;
+
+    return this._sensorLooksNumeric(entry.entity);
+  }
+
+  _sensorLooksNumeric(entityId) {
+    const stateObj = this._hass?.states?.[entityId];
+    if (!stateObj) return false;
+    if (Number.isFinite(Number(stateObj.state))) return true;
+
+    const attributes = stateObj.attributes || {};
+    return Boolean(attributes.unit_of_measurement || attributes.device_class || attributes.state_class);
   }
 
   _numericColorForState(entry, state) {

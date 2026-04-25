@@ -190,6 +190,8 @@ entities:
 
 Numeric rows are omitted from the discrete state legend.
 
+When global `color_stops` are configured, `sensor`, `number`, and `input_number` entities that look numeric use the stops automatically. Use `mode: state` to force a sensor to use discrete state colors.
+
 ## Visual Editor
 
 The visual editor supports the common card options, entity rows, and global state color/label maps. Advanced per-entity `state_colors` and `state_labels` remain available through the raw YAML editor.
