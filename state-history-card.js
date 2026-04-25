@@ -27,11 +27,16 @@ class StateHistoryCard extends HTMLElement {
     this._lastStateSignature = "";
     this._activeTooltipSegment = undefined;
     this._tooltipPinned = false;
+    this._labelPressTimer = undefined;
+    this._labelLongPressed = false;
+    this._labelPressTarget = undefined;
     this._handleDocumentPointerDown = (event) => {
       if (!event.composedPath().includes(this)) this._hideTooltip();
     };
     this.shadowRoot.addEventListener("pointermove", (event) => this._handlePointerMove(event));
     this.shadowRoot.addEventListener("pointerdown", (event) => this._handlePointerDown(event));
+    this.shadowRoot.addEventListener("pointerup", () => this._clearLabelPress(!this._labelLongPressed));
+    this.shadowRoot.addEventListener("pointercancel", () => this._clearLabelPress(!this._labelLongPressed));
     this.shadowRoot.addEventListener("click", (event) => this._handleClick(event));
     this.shadowRoot.addEventListener("keydown", (event) => this._handleKeyDown(event));
     this.shadowRoot.addEventListener("pointerleave", () => {
@@ -41,6 +46,7 @@ class StateHistoryCard extends HTMLElement {
 
   disconnectedCallback() {
     document.removeEventListener("pointerdown", this._handleDocumentPointerDown);
+    this._clearLabelPress();
     if (this._labelFrame) cancelAnimationFrame(this._labelFrame);
   }
 
@@ -204,6 +210,8 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _labelForState(entry, state) {
+    if (this._isNumericEntry(entry)) return this._formatNumericState(entry, state);
+
     const entityLabels = this._asMap(entry.state_labels || entry.labels);
     const globalLabels = this._asMap(this._config.state_labels || this._config.labels);
     const candidates = this._stateLookupCandidates(entry, state);
@@ -258,13 +266,17 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _isNumericEntry(entry) {
-    return String(entry.mode || "").trim().toLowerCase() === "numeric" || entry.color_stops;
+    if (String(entry.mode || "").trim().toLowerCase() === "numeric" || entry.color_stops) return true;
+    if (!this._hasColorStops(this._config.color_stops)) return false;
+
+    const domain = entry.entity?.split(".")[0];
+    return ["sensor", "number", "input_number"].includes(domain);
   }
 
   _numericColorForState(entry, state) {
-    const value = Number(state);
-    const stops = this._colorStops(entry.color_stops);
-    if (!Number.isFinite(value) || stops.length === 0) return undefined;
+    const value = this._numericValueForColor(entry, state);
+    const stops = this._colorStops(entry.color_stops || this._config.color_stops);
+    if (!Number.isFinite(value) || stops.length === 0) return this._nullColor(entry);
 
     if (value <= stops[0].value) return stops[0].color;
     if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
@@ -281,6 +293,56 @@ class StateHistoryCard extends HTMLElement {
     return undefined;
   }
 
+  _nullColor(entry) {
+    return entry.null_color || this._config.null_color || "var(--secondary-background-color)";
+  }
+
+  _trackBackground(entry) {
+    return this._isNumericEntry(entry) ? this._nullColor(entry) : "var(--secondary-background-color)";
+  }
+
+  _labelActionColor(entry, intervals) {
+    const current = intervals[intervals.length - 1];
+    if (!current) return this._trackBackground(entry);
+
+    return this._colorForState(entry, current.state);
+  }
+
+  _formatNumericState(entry, state) {
+    const value = this._numericValueForColor(entry, state);
+    if (!Number.isFinite(value)) return String(state);
+
+    const decimals = this._decimals(entry);
+    return decimals === undefined ? String(state) : value.toFixed(decimals);
+  }
+
+  _rawLabelForState(entry, state) {
+    return this._isNumericEntry(entry) ? String(state) : "";
+  }
+
+  _numericValueForColor(entry, state) {
+    const value = Number(state);
+    if (!Number.isFinite(value)) return NaN;
+
+    const decimals = this._decimals(entry);
+    if (decimals === undefined) return value;
+
+    const scale = 10 ** decimals;
+    return Math.round(value * scale) / scale;
+  }
+
+  _decimals(entry) {
+    const value = entry.decimals ?? this._config.decimals;
+    if (value === undefined || value === null || value === "") return undefined;
+
+    const decimals = Number(value);
+    return Number.isFinite(decimals) ? Math.max(0, Math.min(10, Math.round(decimals))) : undefined;
+  }
+
+  _hasColorStops(stops) {
+    return this._colorStops(stops).length > 0;
+  }
+
   _colorStops(stops) {
     const entries = Array.isArray(stops)
       ? stops.map((stop) => [stop.value, stop.color])
@@ -291,7 +353,7 @@ class StateHistoryCard extends HTMLElement {
         value: Number(value),
         color: String(color || "").trim(),
       }))
-      .filter((stop) => Number.isFinite(stop.value) && this._parseColor(stop.color))
+      .filter((stop) => Number.isFinite(stop.value) && stop.color)
       .sort((a, b) => a.value - b.value);
   }
 
@@ -307,6 +369,9 @@ class StateHistoryCard extends HTMLElement {
 
   _parseColor(color) {
     const value = String(color || "").trim();
+    const named = BASIC_COLOR_NAMES[value.toLowerCase()];
+    if (named) return named;
+
     const shortHex = value.match(/^#([0-9a-f]{3})$/i);
     if (shortHex) {
       return shortHex[1].split("").map((part) => parseInt(part + part, 16));
@@ -512,10 +577,14 @@ class StateHistoryCard extends HTMLElement {
           white-space: nowrap;
         }
 
-        .name[data-action] {
+        .name[data-action],
+        .name[data-more-info] {
           cursor: pointer;
+        }
+
+        .name[data-action] {
           text-decoration: underline;
-          text-decoration-color: var(--secondary-text-color);
+          text-decoration-color: var(--label-action-color, var(--secondary-text-color));
           text-underline-offset: 2px;
         }
 
@@ -523,12 +592,6 @@ class StateHistoryCard extends HTMLElement {
         .name[data-action]:focus-visible {
           color: var(--primary-color);
           outline: 0;
-        }
-
-        .name:disabled {
-          color: var(--primary-text-color);
-          cursor: default;
-          opacity: 1;
         }
 
         .track {
@@ -544,7 +607,7 @@ class StateHistoryCard extends HTMLElement {
               var(--divider-color) calc(25% - 1px),
               var(--divider-color) 25%
             ),
-            var(--secondary-background-color);
+            var(--track-background, var(--secondary-background-color));
         }
 
         .segment {
@@ -727,30 +790,36 @@ class StateHistoryCard extends HTMLElement {
               : `<div class="chart">
                   ${rows
                     .map(
-                      ({ entry, intervals }) => `
+                      ({ entry, intervals }) => {
+                        const labelAction = this._labelAction(entry);
+                        const labelActionColor = this._labelActionColor(entry, intervals);
+                        return `
                         <div class="row">
                           <button
                             class="name"
                             title="${this._escape(this._displayName(entry))}"
                             data-entity-id="${this._escapeAttr(entry.entity)}"
-                            ${this._labelAction(entry) ? `data-action="${this._escapeAttr(this._labelAction(entry))}"` : ""}
-                            ${this._labelAction(entry) ? "" : "disabled"}
+                            data-more-info="true"
+                            ${labelAction ? `data-action="${this._escapeAttr(labelAction)}"` : ""}
+                            style="--label-action-color:${this._escapeAttr(labelActionColor)}"
                             type="button"
                           >
                             ${this._escape(this._displayName(entry))}
                           </button>
-                          <div class="track">
+                          <div class="track" style="--track-background:${this._escapeAttr(this._trackBackground(entry))}">
                             ${intervals
                               .map((interval) => {
                                 const left = ((interval.start - startMs) / spanMs) * 100;
                                 const width = ((interval.end - interval.start) / spanMs) * 100;
                                 const color = this._colorForState(entry, interval.state);
                                 const label = this._labelForState(entry, interval.state);
+                                const rawLabel = this._rawLabelForState(entry, interval.state);
                                 return `<div
                                   class="segment"
                                   tabindex="0"
                                   data-state="${this._escapeAttr(label)}"
                                   data-raw-state="${this._escapeAttr(interval.state)}"
+                                  data-raw-label="${this._escapeAttr(rawLabel)}"
                                   data-start="${this._escapeAttr(this._formatDateTime(interval.start))}"
                                   data-end="${this._escapeAttr(this._formatDateTime(interval.end))}"
                                   data-duration="${this._escapeAttr(
@@ -768,7 +837,8 @@ class StateHistoryCard extends HTMLElement {
                               .join("")}
                           </div>
                         </div>
-                      `
+                      `;
+                      }
                     )
                     .join("")}
                 </div>
@@ -827,9 +897,15 @@ class StateHistoryCard extends HTMLElement {
 
   _labelAction(entry) {
     const action = entry.label_action;
-    if (!action) return "";
+    if (action === false) return "";
+
+    if (action === undefined || action === null || action === "") {
+      const domain = entry.entity?.split(".")[0];
+      return ["light", "switch", "fan", "input_boolean"].includes(domain) ? "toggle" : "";
+    }
 
     const value = typeof action === "string" ? action : action.action;
+    if (["off", "false", "none", "disabled"].includes(String(value || "").trim().toLowerCase())) return "";
     return String(value || "").trim().toLowerCase() === "toggle" ? "toggle" : "";
   }
 
@@ -844,6 +920,18 @@ class StateHistoryCard extends HTMLElement {
       this._error = err?.message || String(err);
       this._render();
     }
+  }
+
+  _showMoreInfo(entityId) {
+    if (!entityId) return;
+
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        detail: { entityId },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   _labelMode() {
@@ -1075,24 +1163,39 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _handleClick(event) {
-    const target = event.target.closest?.(".name[data-action]");
+    const target = event.target.closest?.(".name[data-more-info]");
     if (!target) return;
 
     event.stopPropagation();
+    if (this._labelLongPressed) {
+      this._labelLongPressed = false;
+      return;
+    }
+
     this._performLabelAction(target);
   }
 
   _handleKeyDown(event) {
     if (event.key !== "Enter" && event.key !== " ") return;
 
-    const target = event.target.closest?.(".name[data-action]");
+    const target = event.target.closest?.(".name[data-more-info]");
     if (!target) return;
 
     event.preventDefault();
-    this._performLabelAction(target);
+    if (event.key === "Enter") {
+      this._performLabelAction(target);
+    } else {
+      this._showMoreInfo(target.dataset.entityId);
+    }
   }
 
   _handlePointerDown(event) {
+    const label = event.target.closest?.(".name[data-more-info]");
+    if (label) {
+      this._startLabelPress(label);
+      return;
+    }
+
     const segment = event.target.closest?.(".segment");
     if (!segment) {
       this._hideTooltip();
@@ -1107,6 +1210,29 @@ class StateHistoryCard extends HTMLElement {
     this._tooltipPinned = true;
     document.addEventListener("pointerdown", this._handleDocumentPointerDown);
     this._showTooltip(segment, event.clientX, event.clientY);
+  }
+
+  _startLabelPress(target) {
+    this._clearLabelPress();
+    this._labelLongPressed = false;
+    this._labelPressTarget = target;
+    this._labelPressTimer = setTimeout(() => {
+      if (this._labelPressTarget !== target) return;
+
+      this._labelLongPressed = true;
+      this._showMoreInfo(target.dataset.entityId);
+      this._clearLabelPress(false);
+      setTimeout(() => {
+        this._labelLongPressed = false;
+      }, 750);
+    }, 550);
+  }
+
+  _clearLabelPress(resetLongPress = true) {
+    if (this._labelPressTimer) clearTimeout(this._labelPressTimer);
+    this._labelPressTimer = undefined;
+    this._labelPressTarget = undefined;
+    if (resetLongPress) this._labelLongPressed = false;
   }
 
   _handlePointerMove(event) {
@@ -1126,8 +1252,12 @@ class StateHistoryCard extends HTMLElement {
     if (!tooltip) return;
 
     this._activeTooltipSegment = segment;
+    const rawRow = segment.dataset.rawLabel
+      ? `<div class="tooltip-row"><span>Raw</span><span>${this._escape(segment.dataset.rawLabel)}</span></div>`
+      : "";
     tooltip.innerHTML = `
       <div class="tooltip-state">${this._escape(segment.dataset.state || "")}</div>
+      ${rawRow}
       <div class="tooltip-row"><span>Start</span><span>${this._escape(segment.dataset.start || "")}</span></div>
       <div class="tooltip-row"><span>Stop</span><span>${this._escape(segment.dataset.end || "")}</span></div>
       <div class="tooltip-row"><span>Duration</span><span>${this._escape(segment.dataset.duration || "")}</span></div>
@@ -1706,6 +1836,22 @@ const DEFAULT_STATE_LABELS = {
     on: "Open",
     off: "Closed",
   },
+};
+
+const BASIC_COLOR_NAMES = {
+  black: [0, 0, 0],
+  blue: [0, 0, 255],
+  cyan: [0, 255, 255],
+  gray: [128, 128, 128],
+  green: [0, 128, 0],
+  grey: [128, 128, 128],
+  lime: [0, 255, 0],
+  magenta: [255, 0, 255],
+  orange: [255, 165, 0],
+  purple: [128, 0, 128],
+  red: [255, 0, 0],
+  white: [255, 255, 255],
+  yellow: [255, 255, 0],
 };
 
 customElements.define("state-history-card-editor", StateHistoryCardEditor);

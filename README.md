@@ -99,9 +99,14 @@ entities:
 | `timestamps` | string | `on` | Timeline labels: `on` or `off`. Midnight marks show a weekday or date instead of `12:00 AM`. |
 | `state_colors` | object | `{}` | Global state-to-color map. Keys may match raw state, display label, or `|` separated aliases. |
 | `state_labels` | object | `{}` | Global raw-state/display-state-to-label map. Keys may use `|` aliases. |
+| `color_stops` | object | none | Global numeric value-to-color stops. Entity-level `color_stops` override this. |
+| `null_color` | string | theme background | Color for numeric rows when a value is missing, invalid, or the row has no data. |
+| `decimals` | number | none | Global decimal places for numeric color calculation and display labels. Raw values remain visible in hover details. |
 | `entities[].mode` | string | `state` | Set to `numeric` to color numeric sensor history from `color_stops`. |
-| `entities[].color_stops` | object | none | Numeric value-to-color stops. Colors between stops are interpolated. |
-| `entities[].label_action` | object/string | none | Set to `toggle` or `{ action: toggle }` to make the left entity label toggle the entity. |
+| `entities[].color_stops` | object | none | Numeric value-to-color stops. Overrides global `color_stops`. |
+| `entities[].null_color` | string | global/theme background | Per-entity color for missing or invalid numeric values. |
+| `entities[].decimals` | number | global/none | Per-entity decimal places for numeric color calculation and display labels. |
+| `entities[].label_action` | object/string | auto | Set to `toggle` or `{ action: toggle }` to make the left entity label toggle the entity. Set to `off` to disable. |
 | `entities[].state_colors` | object | none | Per-entity state color map. Overrides global colors for that entity. |
 | `entities[].state_labels` | object | none | Per-entity state label map. Overrides global labels for that entity. |
 | `show_legend` | boolean | `true` | Legacy alias. Set to `false` to hide the legend. |
@@ -143,16 +148,16 @@ entities:
 
 ## Label Actions
 
-For entities that support toggling, the left entity label can call `homeassistant.toggle`:
+For `light`, `switch`, `fan`, and `input_boolean` entities, the left entity label calls `homeassistant.toggle` on short click/touch. Long click/touch opens Home Assistant more-info.
 
 ```yaml
 type: custom:state-history-card
 entities:
   - entity: light.office
     name: Office
-    label_action:
-      action: toggle
 ```
+
+Use `label_action: off` to disable the short-click toggle for an entity. Use `label_action: toggle` to enable it for another domain.
 
 The history bar itself remains dedicated to hover/touch history details.
 
@@ -162,15 +167,25 @@ Numeric sensors can render as interpolated color bands:
 
 ```yaml
 type: custom:state-history-card
+color_stops:
+  60: "#2563eb"
+  68: "#22c55e"
+  76: "#facc15"
+  82: "#dc2626"
+null_color: "#3f3f46"
+decimals: 1
 entities:
   - entity: sensor.office_temperature
     name: Office temp
     mode: numeric
+  - entity: sensor.living_room_temperature
+    name: Living room temp
+    mode: numeric
     color_stops:
-      60: "#2563eb"
-      68: "#22c55e"
-      76: "#facc15"
-      82: "#dc2626"
+      62: "#2563eb"
+      72: "#22c55e"
+      84: "#dc2626"
+    decimals: 0
 ```
 
 Numeric rows are omitted from the discrete state legend.
