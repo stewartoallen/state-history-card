@@ -1,6 +1,6 @@
 class HaStateHistoryCard extends HTMLElement {
   static getConfigElement() {
-    return document.createElement("hui-history-graph-card-editor");
+    return document.createElement("ha-state-history-card-editor");
   }
 
   static getStubConfig() {
@@ -26,7 +26,7 @@ class HaStateHistoryCard extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config || !Array.isArray(config.entities) || config.entities.length === 0) {
+    if (!config || !Array.isArray(config.entities)) {
       throw new Error("entities is required");
     }
 
@@ -48,6 +48,11 @@ class HaStateHistoryCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._config) return;
+
+    if (this._entityIds().length === 0) {
+      this._render();
+      return;
+    }
 
     const now = Date.now();
     const fetchKey = [
@@ -81,13 +86,15 @@ class HaStateHistoryCard extends HTMLElement {
   async _fetchHistory() {
     if (!this._hass || !this._config) return;
 
+    const entityIds = this._entityIds();
+    if (entityIds.length === 0) return;
+
     this._loading = true;
     this._error = "";
     this._render();
 
     const end = new Date();
     const start = new Date(end.getTime() - this._config.hours_to_show * 60 * 60 * 1000);
-    const entityIds = this._entityIds();
     const params = new URLSearchParams({
       filter_entity_id: entityIds.join(","),
       end_time: end.toISOString(),
@@ -278,10 +285,12 @@ class HaStateHistoryCard extends HTMLElement {
     const startMs = start.getTime();
     const endMs = end.getTime();
     const spanMs = endMs - startMs;
-    const rows = this._entityConfigs().map((entry) => ({
-      entry,
-      intervals: this._intervalsFor(entry, startMs, endMs),
-    }));
+    const rows = this._entityConfigs()
+      .filter((entry) => entry.entity)
+      .map((entry) => ({
+        entry,
+        intervals: this._intervalsFor(entry, startMs, endMs),
+      }));
     const states = this._legendStates(rows);
     const legendPosition = this._legendPosition();
     const titlePosition = this._positionValue(this._config.title_position, "left");
@@ -327,6 +336,12 @@ class HaStateHistoryCard extends HTMLElement {
 
         .status.error {
           color: var(--error-color);
+        }
+
+        .empty {
+          color: var(--secondary-text-color);
+          font-size: 14px;
+          padding: 4px 0;
         }
 
         .chart {
@@ -516,57 +531,61 @@ class HaStateHistoryCard extends HTMLElement {
             : ""
         }
         <div class="content">
-          <div class="chart">
-            ${rows
-              .map(
-                ({ entry, intervals }) => `
-                  <div class="row">
-                    <div class="name" title="${this._escape(this._displayName(entry))}">
-                      ${this._escape(this._displayName(entry))}
-                    </div>
-                    <div class="track">
-                      ${intervals
-                        .map((interval) => {
-                          const left = ((interval.start - startMs) / spanMs) * 100;
-                          const width = ((interval.end - interval.start) / spanMs) * 100;
-                          const color = this._colorForState(entry, interval.state);
-                          const label = this._labelForState(entry, interval.state);
-                          return `<div
-                            class="segment"
-                            tabindex="0"
-                            data-state="${this._escapeAttr(label)}"
-                            data-raw-state="${this._escapeAttr(interval.state)}"
-                            data-start="${this._escapeAttr(this._formatDateTime(interval.start))}"
-                            data-end="${this._escapeAttr(this._formatDateTime(interval.end))}"
-                            data-duration="${this._escapeAttr(this._formatDuration(interval.end - interval.start))}"
-                            aria-label="${this._escapeAttr(
-                              `${label}, ${this._formatDateTime(interval.start)} to ${this._formatDateTime(
-                                interval.end
-                              )}, ${this._formatDuration(interval.end - interval.start)}`
-                            )}"
-                            style="left:${left}%;width:${width}%;--segment-color:${this._escapeAttr(
-                            color
-                          )}">
-                            <span class="segment-label">${this._escape(label)}</span>
-                          </div>`;
-                        })
-                        .join("")}
-                    </div>
-                  </div>
-                `
-              )
-              .join("")}
-          </div>
-          <div class="axis">
-            <div></div>
-            <div class="ticks">
-              <span>${this._formatTime(startMs)}</span>
-              <span>${this._formatTime(startMs + spanMs / 2)}</span>
-              <span>${this._formatTime(endMs)}</span>
-            </div>
-          </div>
           ${
-            legendPosition === "off"
+            rows.length === 0
+              ? `<div class="empty">No entities configured</div>`
+              : `<div class="chart">
+                  ${rows
+                    .map(
+                      ({ entry, intervals }) => `
+                        <div class="row">
+                          <div class="name" title="${this._escape(this._displayName(entry))}">
+                            ${this._escape(this._displayName(entry))}
+                          </div>
+                          <div class="track">
+                            ${intervals
+                              .map((interval) => {
+                                const left = ((interval.start - startMs) / spanMs) * 100;
+                                const width = ((interval.end - interval.start) / spanMs) * 100;
+                                const color = this._colorForState(entry, interval.state);
+                                const label = this._labelForState(entry, interval.state);
+                                return `<div
+                                  class="segment"
+                                  tabindex="0"
+                                  data-state="${this._escapeAttr(label)}"
+                                  data-raw-state="${this._escapeAttr(interval.state)}"
+                                  data-start="${this._escapeAttr(this._formatDateTime(interval.start))}"
+                                  data-end="${this._escapeAttr(this._formatDateTime(interval.end))}"
+                                  data-duration="${this._escapeAttr(
+                                    this._formatDuration(interval.end - interval.start)
+                                  )}"
+                                  aria-label="${this._escapeAttr(
+                                    `${label}, ${this._formatDateTime(interval.start)} to ${this._formatDateTime(
+                                      interval.end
+                                    )}, ${this._formatDuration(interval.end - interval.start)}`
+                                  )}"
+                                  style="left:${left}%;width:${width}%;--segment-color:${this._escapeAttr(color)}">
+                                  <span class="segment-label">${this._escape(label)}</span>
+                                </div>`;
+                              })
+                              .join("")}
+                          </div>
+                        </div>
+                      `
+                    )
+                    .join("")}
+                </div>
+                <div class="axis">
+                  <div></div>
+                  <div class="ticks">
+                    <span>${this._formatTime(startMs)}</span>
+                    <span>${this._formatTime(startMs + spanMs / 2)}</span>
+                    <span>${this._formatTime(endMs)}</span>
+                  </div>
+                </div>`
+          }
+          ${
+            legendPosition === "off" || states.length === 0
               ? ""
               : `<div class="legend" data-position="${this._escapeAttr(legendPosition)}">
                   ${states
@@ -731,6 +750,380 @@ class HaStateHistoryCard extends HTMLElement {
   }
 }
 
+class HaStateHistoryCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._config = {};
+    this._hass = undefined;
+    this._entityDraft = [];
+    this._colorDraft = [];
+    this._labelDraft = [];
+  }
+
+  setConfig(config) {
+    this._config = { ...config };
+    this._entityDraft = this._entityConfigs(config.entities || []);
+    this._colorDraft = this._mapEntries(config.state_colors || config.colors || {});
+    this._labelDraft = this._mapEntries(config.state_labels || config.labels || {});
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+  }
+
+  _render() {
+    const config = this._config || {};
+    const entities = this._entityDraft;
+    const stateColors = this._colorDraft;
+    const stateLabels = this._labelDraft;
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host {
+          display: block;
+        }
+
+        .editor {
+          display: grid;
+          gap: 18px;
+        }
+
+        fieldset {
+          display: grid;
+          gap: 12px;
+          min-width: 0;
+          margin: 0;
+          padding: 0;
+          border: 0;
+        }
+
+        legend {
+          margin-bottom: 2px;
+          padding: 0;
+          color: var(--primary-text-color);
+          font-size: 14px;
+          font-weight: 600;
+        }
+
+        label {
+          display: grid;
+          gap: 5px;
+          color: var(--secondary-text-color);
+          font-size: 12px;
+        }
+
+        input,
+        select {
+          box-sizing: border-box;
+          width: 100%;
+          min-height: 40px;
+          border: 1px solid var(--divider-color);
+          border-radius: 4px;
+          padding: 8px 10px;
+          background: var(--card-background-color);
+          color: var(--primary-text-color);
+          font: inherit;
+        }
+
+        .grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+        }
+
+        .row {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+          gap: 8px;
+          align-items: end;
+        }
+
+        .map-row {
+          grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto;
+        }
+
+        button {
+          min-height: 40px;
+          border: 1px solid var(--divider-color);
+          border-radius: 4px;
+          padding: 8px 12px;
+          background: var(--secondary-background-color);
+          color: var(--primary-text-color);
+          font: inherit;
+          cursor: pointer;
+        }
+
+        button[data-action^="remove"] {
+          width: 40px;
+          padding: 0;
+        }
+
+        .add {
+          justify-self: start;
+        }
+
+        @media (max-width: 640px) {
+          .grid,
+          .row,
+          .map-row {
+            grid-template-columns: 1fr;
+          }
+
+          button[data-action^="remove"] {
+            width: auto;
+          }
+        }
+      </style>
+      <div class="editor">
+        <fieldset>
+          <legend>Title</legend>
+          <div class="grid">
+            <label>
+              Text
+              <input data-field="title" value="${this._escapeAttr(config.title || "")}" placeholder="Hidden when empty">
+            </label>
+            <label>
+              Size
+              <input data-field="title_size" value="${this._escapeAttr(config.title_size || "")}" placeholder="24px">
+            </label>
+            <label>
+              Position
+              <select data-field="title_position">
+                ${this._option("left", "Left", config.title_position || "left")}
+                ${this._option("center", "Center", config.title_position)}
+                ${this._option("right", "Right", config.title_position)}
+              </select>
+            </label>
+            <label>
+              Legend
+              <select data-field="legend">
+                ${this._option("on", "On / left", config.legend || "on")}
+                ${this._option("center", "Center", config.legend)}
+                ${this._option("right", "Right", config.legend)}
+                ${this._option("off", "Off", config.legend)}
+              </select>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>History</legend>
+          <div class="grid">
+            <label>
+              Hours to show
+              <input data-field="hours_to_show" type="number" min="1" step="1" value="${this._escapeAttr(
+                config.hours_to_show ?? 24
+              )}">
+            </label>
+            <label>
+              Refresh interval
+              <input data-field="refresh_interval" type="number" min="10" step="10" value="${this._escapeAttr(
+                config.refresh_interval ?? 300
+              )}">
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Entities</legend>
+          <div class="entity-rows">
+            ${entities.map((entry, index) => this._entityRow(entry, index)).join("")}
+          </div>
+          <button class="add" data-action="add-entity" type="button">Add entity</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>State colors</legend>
+          <div class="color-rows">
+            ${stateColors.map(([key, value], index) => this._mapRow("color", key, value, index)).join("")}
+          </div>
+          <button class="add" data-action="add-color" type="button">Add color</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>State labels</legend>
+          <div class="label-rows">
+            ${stateLabels.map(([key, value], index) => this._mapRow("label", key, value, index)).join("")}
+          </div>
+          <button class="add" data-action="add-label" type="button">Add label</button>
+        </fieldset>
+      </div>
+    `;
+
+    this.shadowRoot.querySelector(".editor").addEventListener("input", (event) => this._handleInput(event));
+    this.shadowRoot.querySelector(".editor").addEventListener("change", (event) => this._handleInput(event));
+    this.shadowRoot.querySelector(".editor").addEventListener("click", (event) => this._handleClick(event));
+  }
+
+  _entityRow(entry, index) {
+    return `
+      <div class="row">
+        <label>
+          Entity
+          <input data-entity-index="${index}" data-entity-field="entity" value="${this._escapeAttr(
+            entry.entity || ""
+          )}" placeholder="binary_sensor.kitchen_presence">
+        </label>
+        <label>
+          Name
+          <input data-entity-index="${index}" data-entity-field="name" value="${this._escapeAttr(
+            entry.name || ""
+          )}" placeholder="Optional">
+        </label>
+        <button data-action="remove-entity" data-index="${index}" type="button" aria-label="Remove entity">x</button>
+      </div>
+    `;
+  }
+
+  _mapRow(type, key, value, index) {
+    return `
+      <div class="row map-row">
+        <label>
+          State
+          <input data-map-type="${type}" data-map-index="${index}" data-map-field="key" value="${this._escapeAttr(
+            key
+          )}" placeholder="on|Home">
+        </label>
+        <label>
+          ${type === "color" ? "Color" : "Label"}
+          <input data-map-type="${type}" data-map-index="${index}" data-map-field="value" value="${this._escapeAttr(
+            value
+          )}" placeholder="${type === "color" ? "#22c55e" : "Home"}">
+        </label>
+        <button data-action="remove-${type}" data-index="${index}" type="button" aria-label="Remove ${type}">x</button>
+      </div>
+    `;
+  }
+
+  _handleInput(event) {
+    const target = event.target;
+    if (target.dataset.field) {
+      this._updateField(target.dataset.field, target.value, target.type);
+      return;
+    }
+
+    if (target.dataset.entityField) {
+      this._updateEntity(Number(target.dataset.entityIndex), target.dataset.entityField, target.value);
+      return;
+    }
+
+    if (target.dataset.mapField) {
+      this._updateMap(target.dataset.mapType, Number(target.dataset.mapIndex), target.dataset.mapField, target.value);
+    }
+  }
+
+  _handleClick(event) {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+
+    const action = button.dataset.action;
+    if (action === "add-entity") this._addEntity();
+    if (action === "remove-entity") this._removeEntity(Number(button.dataset.index));
+    if (action === "add-color") this._addMapEntry("color");
+    if (action === "remove-color") this._removeMapEntry("color", Number(button.dataset.index));
+    if (action === "add-label") this._addMapEntry("label");
+    if (action === "remove-label") this._removeMapEntry("label", Number(button.dataset.index));
+  }
+
+  _updateField(field, value, type) {
+    const config = { ...this._config };
+    if (value === "" && field !== "title") {
+      delete config[field];
+    } else if (field === "title" && value === "") {
+      delete config.title;
+    } else if (type === "number") {
+      config[field] = Number(value);
+    } else {
+      config[field] = value;
+    }
+    this._configChanged(config);
+  }
+
+  _updateEntity(index, field, value) {
+    this._entityDraft[index] = { ...(this._entityDraft[index] || {}), [field]: value };
+    if (field === "name" && value === "") delete this._entityDraft[index].name;
+    this._configChanged({ ...this._config, entities: this._entityDraft.filter((entry) => entry.entity) });
+  }
+
+  _addEntity() {
+    this._entityDraft.push({ entity: "" });
+    this._render();
+  }
+
+  _removeEntity(index) {
+    this._entityDraft.splice(index, 1);
+    this._configChanged({ ...this._config, entities: this._entityDraft.filter((entry) => entry.entity) }, true);
+  }
+
+  _updateMap(type, index, field, value) {
+    const configKey = type === "color" ? "state_colors" : "state_labels";
+    const entries = type === "color" ? this._colorDraft : this._labelDraft;
+    entries[index] = entries[index] || ["", ""];
+    entries[index][field === "key" ? 0 : 1] = value;
+    this._configChanged({ ...this._config, [configKey]: this._entriesToMap(entries) });
+  }
+
+  _addMapEntry(type) {
+    const entries = type === "color" ? this._colorDraft : this._labelDraft;
+    entries.push(["", ""]);
+    this._render();
+  }
+
+  _removeMapEntry(type, index) {
+    const configKey = type === "color" ? "state_colors" : "state_labels";
+    const entries = type === "color" ? this._colorDraft : this._labelDraft;
+    entries.splice(index, 1);
+    this._configChanged({ ...this._config, [configKey]: this._entriesToMap(entries) }, true);
+  }
+
+  _configChanged(config, rerender = false) {
+    this._config = config;
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config },
+        bubbles: true,
+        composed: true,
+      })
+    );
+    if (rerender) this._render();
+  }
+
+  _entityConfigs(entities) {
+    return entities.map((entry) => (typeof entry === "string" ? { entity: entry } : { ...entry }));
+  }
+
+  _mapEntries(map) {
+    return Object.entries(map || {});
+  }
+
+  _entriesToMap(entries) {
+    return entries.reduce((map, [key, value]) => {
+      if (key) map[key] = value;
+      return map;
+    }, {});
+  }
+
+  _option(value, label, selectedValue) {
+    const selected = String(selectedValue || "").toLowerCase() === value ? " selected" : "";
+    return `<option value="${this._escapeAttr(value)}"${selected}>${this._escape(label)}</option>`;
+  }
+
+  _escape(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  _escapeAttr(value) {
+    return this._escape(value).replaceAll(";", "");
+  }
+}
+
 const DEFAULT_STATE_COLORS = {
   on: "var(--state-active-color, #fdd835)",
   off: "var(--disabled-color, #9e9e9e)",
@@ -787,6 +1180,7 @@ const DEFAULT_STATE_LABELS = {
   },
 };
 
+customElements.define("ha-state-history-card-editor", HaStateHistoryCardEditor);
 customElements.define("ha-state-history-card", HaStateHistoryCard);
 
 window.customCards = window.customCards || [];

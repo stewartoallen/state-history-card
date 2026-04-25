@@ -58,3 +58,5 @@ state_labels:
 ```
 
 Long enough state segments are labeled inline. Hovering a segment shows the state, start time, stop time, and duration.
+
+The visual editor supports the common card options, entity rows, and global state color/label maps. Advanced per-entity `state_colors` and `state_labels` remain available through the raw YAML editor.
