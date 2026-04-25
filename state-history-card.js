@@ -606,8 +606,7 @@ class StateHistoryCard extends HTMLElement {
         }
 
         .name[data-action]:hover,
-        .name[data-action]:focus-visible,
-        .name[data-more-info]:focus-visible {
+        .name[data-action]:focus-visible {
           color: var(--primary-color);
           outline: 0;
         }
