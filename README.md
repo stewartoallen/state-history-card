@@ -233,7 +233,7 @@ Set `color_source: light` globally if most label underlines should use live ligh
 
 ## Visual Editor
 
-The visual editor supports the common card options, entity rows, and global state color/label maps. Advanced per-entity `state_colors` and `state_labels` remain available through the raw YAML editor.
+The visual editor supports the common card options, entity rows, global state color/label maps, and global numeric color stops. Advanced per-entity `state_colors`, `state_labels`, and `color_stops` remain available through the raw YAML editor.
 
 ## Development
 

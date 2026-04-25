@@ -1505,6 +1505,7 @@ class StateHistoryCardEditor extends HTMLElement {
     this._hass = undefined;
     this._entityDraft = [];
     this._colorDraft = [];
+    this._colorStopDraft = [];
     this._labelDraft = [];
     this._configDebounce = undefined;
     this.shadowRoot.addEventListener("focusout", () => this._flushConfigChangeSoon());
@@ -1516,6 +1517,7 @@ class StateHistoryCardEditor extends HTMLElement {
 
     this._entityDraft = this._entityConfigs(config.entities || []);
     this._colorDraft = this._mapEntries(config.state_colors || config.colors || {});
+    this._colorStopDraft = this._mapEntries(config.color_stops || {});
     this._labelDraft = this._mapEntries(this._labelsEditable(config) ? config.state_labels || config.labels || {} : {});
     this._render();
   }
@@ -1528,6 +1530,7 @@ class StateHistoryCardEditor extends HTMLElement {
     const config = this._config || {};
     const entities = this._entityDraft;
     const stateColors = this._colorDraft;
+    const colorStops = this._colorStopDraft;
     const stateLabels = this._labelDraft;
 
     this.shadowRoot.innerHTML = `
@@ -1596,6 +1599,10 @@ class StateHistoryCardEditor extends HTMLElement {
         }
 
         .map-row.color-row {
+          grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto auto;
+        }
+
+        .map-row.stop-row {
           grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto auto;
         }
 
@@ -1736,6 +1743,14 @@ class StateHistoryCardEditor extends HTMLElement {
         </fieldset>
 
         <fieldset>
+          <legend>Color stops</legend>
+          <div class="stop-rows">
+            ${colorStops.map(([key, value], index) => this._mapRow("stop", key, value, index)).join("")}
+          </div>
+          <button class="add" data-action="add-stop" type="button">Add stop</button>
+        </fieldset>
+
+        <fieldset>
           <legend>State labels</legend>
           <div class="label-rows">
             ${stateLabels.map(([key, value], index) => this._mapRow("label", key, value, index)).join("")}
@@ -1772,22 +1787,22 @@ class StateHistoryCardEditor extends HTMLElement {
 
   _mapRow(type, key, value, index) {
     return `
-      <div class="row map-row ${type === "color" ? "color-row" : ""}">
+      <div class="row map-row ${type === "color" ? "color-row" : ""} ${type === "stop" ? "stop-row" : ""}">
         <label>
-          State
+          ${type === "stop" ? "Value" : "State"}
           <input data-map-type="${type}" data-map-index="${index}" data-map-field="key" value="${this._escapeAttr(
             key
-          )}" placeholder="on|Home">
+          )}" placeholder="${type === "stop" ? "70" : "on|Home"}">
         </label>
         <label>
-          ${type === "color" ? "Color" : "Label"}
+          ${type === "label" ? "Label" : "Color"}
           <input data-map-type="${type}" data-map-index="${index}" data-map-field="value" value="${this._escapeAttr(
             value
-          )}" placeholder="${type === "color" ? "#22c55e" : "Home"}">
+          )}" placeholder="${type === "label" ? "Home" : "#22c55e"}">
         </label>
         <button data-action="remove-${type}" data-index="${index}" type="button" aria-label="Remove ${type}">x</button>
         ${
-          type === "color"
+          type === "color" || type === "stop"
             ? `<span class="color-preview" style="--preview-color:${this._escapeAttr(value || "transparent")}"></span>`
             : ""
         }
@@ -1828,6 +1843,8 @@ class StateHistoryCardEditor extends HTMLElement {
     if (action === "remove-entity") this._removeEntity(Number(button.dataset.index));
     if (action === "add-color") this._addMapEntry("color");
     if (action === "remove-color") this._removeMapEntry("color", Number(button.dataset.index));
+    if (action === "add-stop") this._addMapEntry("stop");
+    if (action === "remove-stop") this._removeMapEntry("stop", Number(button.dataset.index));
     if (action === "add-label") this._addMapEntry("label");
     if (action === "remove-label") this._removeMapEntry("label", Number(button.dataset.index));
   }
@@ -1864,8 +1881,8 @@ class StateHistoryCardEditor extends HTMLElement {
   }
 
   _updateMap(type, index, field, value, debounce = false) {
-    const configKey = type === "color" ? "state_colors" : "state_labels";
-    const entries = type === "color" ? this._colorDraft : this._labelDraft;
+    const configKey = this._mapConfigKey(type);
+    const entries = this._mapDraft(type);
     entries[index] = entries[index] || ["", ""];
     entries[index][field === "key" ? 0 : 1] = value;
     this._updateColorPreview(type, index, entries[index][1]);
@@ -1873,14 +1890,13 @@ class StateHistoryCardEditor extends HTMLElement {
   }
 
   _addMapEntry(type) {
-    const entries = type === "color" ? this._colorDraft : this._labelDraft;
-    entries.push(["", ""]);
+    this._mapDraft(type).push(["", ""]);
     this._render();
   }
 
   _removeMapEntry(type, index) {
-    const configKey = type === "color" ? "state_colors" : "state_labels";
-    const entries = type === "color" ? this._colorDraft : this._labelDraft;
+    const configKey = this._mapConfigKey(type);
+    const entries = this._mapDraft(type);
     entries.splice(index, 1);
     this._configChanged({ ...this._config, [configKey]: this._entriesToMap(entries) }, true);
   }
@@ -1927,11 +1943,23 @@ class StateHistoryCardEditor extends HTMLElement {
   }
 
   _updateColorPreview(type, index, value) {
-    if (type !== "color") return;
+    if (type !== "color" && type !== "stop") return;
 
-    const row = this.shadowRoot.querySelector(`.color-row input[data-map-index="${index}"]`)?.closest(".color-row");
+    const row = this.shadowRoot.querySelector(`input[data-map-type="${type}"][data-map-index="${index}"]`)?.closest(".map-row");
     const preview = row?.querySelector(".color-preview");
     if (preview) preview.style.setProperty("--preview-color", value || "transparent");
+  }
+
+  _mapConfigKey(type) {
+    if (type === "color") return "state_colors";
+    if (type === "stop") return "color_stops";
+    return "state_labels";
+  }
+
+  _mapDraft(type) {
+    if (type === "color") return this._colorDraft;
+    if (type === "stop") return this._colorStopDraft;
+    return this._labelDraft;
   }
 
   _entityConfigs(entities) {
