@@ -9,8 +9,8 @@ hours_to_show: 24
 refresh_interval: 300
 show_legend: true
 state_colors:
-  "on": "#22c55e"
-  "off": "#64748b"
+  "on|Home": "#22c55e"
+  "off|Away": "#64748b"
   unavailable: "#a1a1aa"
   unknown: "#a1a1aa"
 state_labels:
@@ -39,5 +39,16 @@ Options:
 - `entities[].state_labels`: Optional. Per-entity raw-state-to-label map. This overrides the global map for that entity.
 
 The card also accepts `colors` as an alias for `state_colors` and `labels` as an alias for `state_labels`.
+
+State color and label keys can match either the raw state from history or the displayed label. Use `|` to list aliases:
+
+```yaml
+state_colors:
+  "on|Home": "#22c55e"
+  "off|Away": "#64748b"
+state_labels:
+  "on|Home": Present
+  "off|Away": Clear
+```
 
 Long enough state segments are labeled inline. Hovering a segment shows the state, start time, stop time, and duration.

@@ -127,37 +127,86 @@ class HaStateHistoryCard extends HTMLElement {
   }
 
   _colorForState(entry, state) {
-    const stateKey = String(state).toLowerCase();
     const entityColors = entry.state_colors || entry.colors || {};
     const globalColors = this._config.state_colors || this._config.colors || {};
+    const candidates = this._stateLookupCandidates(entry, state);
+    const stateKey = String(state).toLowerCase();
     const color =
-      entityColors[state] ||
-      entityColors[stateKey] ||
-      globalColors[state] ||
-      globalColors[stateKey] ||
+      this._lookupMappedValue(entityColors, candidates) ||
+      this._lookupMappedValue(globalColors, candidates) ||
       DEFAULT_STATE_COLORS[stateKey];
 
     return color || this._fallbackColor(state);
   }
 
   _labelForState(entry, state) {
-    const stateKey = String(state).toLowerCase();
     const entityLabels = entry.state_labels || entry.labels || {};
     const globalLabels = this._config.state_labels || this._config.labels || {};
+    const candidates = this._stateLookupCandidates(entry, state);
     const configured =
-      entityLabels[state] ||
-      entityLabels[stateKey] ||
-      globalLabels[state] ||
-      globalLabels[stateKey];
+      this._lookupMappedValue(entityLabels, candidates) ||
+      this._lookupMappedValue(globalLabels, candidates);
 
     if (configured) return configured;
+    return this._defaultLabelForState(entry, state);
+  }
 
+  _stateLookupCandidates(entry, state) {
+    const raw = String(state);
+    const defaultLabel = this._defaultLabelForState(entry, state);
+    const candidates = [raw, raw.toLowerCase()];
+
+    if (defaultLabel) {
+      candidates.push(defaultLabel, String(defaultLabel).toLowerCase());
+    }
+
+    return [...new Set(candidates.map((item) => String(item).trim()).filter(Boolean))];
+  }
+
+  _lookupMappedValue(map, candidates) {
+    for (const [key, value] of Object.entries(map || {})) {
+      const aliases = String(key)
+        .split("|")
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+      for (const alias of aliases) {
+        if (candidates.includes(alias) || candidates.includes(alias.toLowerCase())) {
+          return value;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  _defaultLabelForState(entry, state) {
+    const stateKey = String(state).toLowerCase();
     const stateObj = this._hass?.states?.[entry.entity];
     const domain = entry.entity?.split(".")[0];
     const deviceClass = stateObj?.attributes?.device_class;
-    const domainLabels = DEFAULT_STATE_LABELS[`${domain}.${deviceClass}`] || DEFAULT_STATE_LABELS[domain];
+    const translated = this._translatedLabelForState(domain, deviceClass, stateKey);
+    if (translated) return translated;
 
+    const domainLabels = DEFAULT_STATE_LABELS[`${domain}.${deviceClass}`] || DEFAULT_STATE_LABELS[domain];
     return domainLabels?.[stateKey] || DEFAULT_STATE_LABELS.common[stateKey] || String(state);
+  }
+
+  _translatedLabelForState(domain, deviceClass, state) {
+    if (!this._hass?.localize || !domain || !state) return undefined;
+
+    const keys = [
+      deviceClass ? `component.${domain}.entity_component.${deviceClass}.state.${state}` : "",
+      `component.${domain}.entity_component._.state.${state}`,
+      `component.${domain}.state.${state}`,
+    ].filter(Boolean);
+
+    for (const key of keys) {
+      const translated = this._hass.localize(key);
+      if (translated && translated !== key) return translated;
+    }
+
+    return undefined;
   }
 
   _fallbackColor(state) {
