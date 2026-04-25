@@ -10,6 +10,7 @@ title_size: 24px
 hours_to_show: 24
 refresh_interval: 300
 legend: on
+label: adaptive
 state_colors:
   "on|Home": "#22c55e"
   "off|Away": "#64748b"
@@ -38,6 +39,7 @@ Options:
 - `hours_to_show`: Optional. Defaults to `24`.
 - `refresh_interval`: Optional. Seconds between history API refreshes. Defaults to `300`.
 - `legend`: Optional. State legend display. Use `on`, `off`, `left`, `center`, or `right`. `on` and `left` are synonyms. Defaults to `on`.
+- `label`: Optional. Timeline label display. Use `off`, `day`, `hour`, or `adaptive`. Defaults to `adaptive`.
 - `show_legend`: Optional legacy alias. Set to `false` to hide the state legend.
 - `state_colors`: Optional. Global state-to-color map.
 - `state_labels`: Optional. Global raw-state-to-label map.

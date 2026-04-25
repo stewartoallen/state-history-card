@@ -21,8 +21,18 @@ class HaStateHistoryCard extends HTMLElement {
     this._error = "";
     this._lastFetchKey = "";
     this._labelFrame = undefined;
+    this._axisWidth = 0;
+    this._rangeStartMs = undefined;
+    this._rangeEndMs = undefined;
+    this._lastStateSignature = "";
+    this._resizeObserver = undefined;
     this.shadowRoot.addEventListener("pointermove", (event) => this._handlePointerMove(event));
     this.shadowRoot.addEventListener("pointerleave", () => this._hideTooltip());
+  }
+
+  disconnectedCallback() {
+    if (this._resizeObserver) this._resizeObserver.disconnect();
+    if (this._labelFrame) cancelAnimationFrame(this._labelFrame);
   }
 
   setConfig(config) {
@@ -34,6 +44,7 @@ class HaStateHistoryCard extends HTMLElement {
       hours_to_show: 24,
       refresh_interval: 300,
       legend: "on",
+      label: "adaptive",
       title_position: "left",
       title_size: undefined,
       show_legend: true,
@@ -42,6 +53,9 @@ class HaStateHistoryCard extends HTMLElement {
       ...config,
     };
     this._lastFetchKey = "";
+    this._rangeStartMs = undefined;
+    this._rangeEndMs = undefined;
+    this._lastStateSignature = "";
     this._render();
   }
 
@@ -50,7 +64,10 @@ class HaStateHistoryCard extends HTMLElement {
     if (!this._config) return;
 
     if (this._entityIds().length === 0) {
-      this._render();
+      if (this._lastStateSignature !== "empty") {
+        this._lastStateSignature = "empty";
+        this._render();
+      }
       return;
     }
 
@@ -64,7 +81,12 @@ class HaStateHistoryCard extends HTMLElement {
     if (fetchKey !== this._lastFetchKey && !this._loading) {
       this._lastFetchKey = fetchKey;
       this._fetchHistory();
-    } else {
+      return;
+    }
+
+    const stateSignature = this._stateSignature();
+    if (stateSignature !== this._lastStateSignature) {
+      this._lastStateSignature = stateSignature;
       this._render();
     }
   }
@@ -83,6 +105,20 @@ class HaStateHistoryCard extends HTMLElement {
     return this._entityConfigs().map((entry) => entry.entity).filter(Boolean);
   }
 
+  _stateSignature() {
+    return this._entityIds()
+      .map((entityId) => {
+        const stateObj = this._hass?.states?.[entityId];
+        return [
+          entityId,
+          stateObj?.state || "",
+          stateObj?.last_changed || "",
+          stateObj?.last_updated || "",
+        ].join(":");
+      })
+      .join("|");
+  }
+
   async _fetchHistory() {
     if (!this._hass || !this._config) return;
 
@@ -95,6 +131,8 @@ class HaStateHistoryCard extends HTMLElement {
 
     const end = new Date();
     const start = new Date(end.getTime() - this._config.hours_to_show * 60 * 60 * 1000);
+    this._rangeStartMs = start.getTime();
+    this._rangeEndMs = end.getTime();
     const params = new URLSearchParams({
       filter_entity_id: entityIds.join(","),
       end_time: end.toISOString(),
@@ -122,6 +160,7 @@ class HaStateHistoryCard extends HTMLElement {
       }
 
       this._history = nextHistory;
+      this._lastStateSignature = this._stateSignature();
     } catch (err) {
       this._error = err?.message || String(err);
     } finally {
@@ -280,10 +319,9 @@ class HaStateHistoryCard extends HTMLElement {
   _render() {
     if (!this._config) return;
 
-    const end = new Date();
-    const start = new Date(end.getTime() - this._config.hours_to_show * 60 * 60 * 1000);
-    const startMs = start.getTime();
-    const endMs = end.getTime();
+    const fallbackEndMs = Date.now();
+    const endMs = this._rangeEndMs || fallbackEndMs;
+    const startMs = this._rangeStartMs || endMs - this._config.hours_to_show * 60 * 60 * 1000;
     const spanMs = endMs - startMs;
     const rows = this._entityConfigs()
       .filter((entry) => entry.entity)
@@ -295,6 +333,12 @@ class HaStateHistoryCard extends HTMLElement {
     const legendPosition = this._legendPosition();
     const titlePosition = this._positionValue(this._config.title_position, "left");
     const titleSize = this._titleSize();
+    const labelMode = this._labelMode();
+    const timeTicks = labelMode === "hour" || labelMode === "adaptive" ? this._timeTicks(startMs, endMs, labelMode) : [];
+    const dayTicks =
+      labelMode === "day" || (labelMode === "adaptive" && timeTicks.length === 0)
+        ? this._dayTicks(startMs, endMs)
+        : [];
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -351,8 +395,8 @@ class HaStateHistoryCard extends HTMLElement {
 
         .row {
           display: grid;
-          grid-template-columns: minmax(96px, 28%) minmax(0, 1fr);
-          gap: 12px;
+          grid-template-columns: minmax(72px, 18%) minmax(0, 1fr);
+          gap: 8px;
           align-items: center;
         }
 
@@ -452,18 +496,40 @@ class HaStateHistoryCard extends HTMLElement {
 
         .axis {
           display: grid;
-          grid-template-columns: minmax(96px, 28%) minmax(0, 1fr);
-          gap: 12px;
+          grid-template-columns: minmax(72px, 18%) minmax(0, 1fr);
+          gap: 8px;
           align-items: start;
           margin-top: 2px;
           color: var(--secondary-text-color);
           font-size: 11px;
         }
 
-        .ticks {
-          display: flex;
-          justify-content: space-between;
+        .axis-track {
+          position: relative;
           min-width: 0;
+          min-height: 28px;
+        }
+
+        .day-label {
+          position: absolute;
+          top: 0;
+          left: var(--tick-left);
+          width: 58px;
+          overflow: hidden;
+          text-align: center;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .time-label {
+          position: absolute;
+          bottom: 0;
+          left: var(--tick-left);
+          width: 70px;
+          overflow: hidden;
+          text-align: center;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .legend {
@@ -506,8 +572,8 @@ class HaStateHistoryCard extends HTMLElement {
 
           .row,
           .axis {
-            grid-template-columns: 84px minmax(0, 1fr);
-            gap: 8px;
+            grid-template-columns: 68px minmax(0, 1fr);
+            gap: 6px;
           }
 
           .name {
@@ -577,10 +643,28 @@ class HaStateHistoryCard extends HTMLElement {
                 </div>
                 <div class="axis">
                   <div></div>
-                  <div class="ticks">
-                    <span>${this._formatTime(startMs)}</span>
-                    <span>${this._formatTime(startMs + spanMs / 2)}</span>
-                    <span>${this._formatTime(endMs)}</span>
+                  <div class="axis-track">
+                    ${dayTicks
+                      .map(
+                        (tick) => `
+                          <span class="day-label" style="--tick-left:${this._tickLeftPercent(tick, startMs, spanMs)}%">
+                            ${this._escape(tick.label)}
+                          </span>
+                        `
+                      )
+                      .join("")}
+                    ${timeTicks
+                      .map(
+                        (tick) => `
+                          <span
+                            class="time-label"
+                            style="--tick-left:${this._tickLeftPercent(tick, startMs, spanMs)}%"
+                          >
+                            ${this._escape(tick.label)}
+                          </span>
+                        `
+                      )
+                      .join("")}
                   </div>
                 </div>`
           }
@@ -604,6 +688,7 @@ class HaStateHistoryCard extends HTMLElement {
         <div class="tooltip" role="tooltip"></div>
       </ha-card>
     `;
+    this._observeAxis();
     this._scheduleLabelSync();
   }
 
@@ -613,6 +698,14 @@ class HaStateHistoryCard extends HTMLElement {
     const value = String(this._config.legend || "on").trim().toLowerCase();
     if (value === "off" || value === "false" || value === "none" || value === "hidden") return "off";
     return this._positionValue(value, "left");
+  }
+
+  _labelMode() {
+    const value = String(this._config.label || "adaptive").trim().toLowerCase();
+    if (value === "off" || value === "false" || value === "none" || value === "hidden") return "off";
+    if (value === "day" || value === "days") return "day";
+    if (value === "hour" || value === "hours" || value === "time") return "hour";
+    return "adaptive";
   }
 
   _positionValue(value, fallback) {
@@ -665,6 +758,141 @@ class HaStateHistoryCard extends HTMLElement {
     }).format(new Date(value));
   }
 
+  _dayTicks(startMs, endMs) {
+    const ticks = [];
+    const width = this._axisWidth || 320;
+    const labelWidth = 58;
+    const intervalDays = this._dayTickInterval(startMs, endMs, width, labelWidth);
+    const intervalMs = intervalDays * 86400000;
+    const cursor = new Date(startMs);
+    cursor.setHours(0, 0, 0, 0);
+    const firstLabelTime = cursor.getTime();
+    let index = 0;
+
+    while (cursor.getTime() <= endMs) {
+      const left = this._flowLabelLeftPx(index, intervalMs, startMs, endMs, width);
+      if (left + labelWidth > width) break;
+      ticks.push({
+        time: cursor.getTime(),
+        leftPercent: (left / width) * 100,
+        label: this._formatDay(cursor.getTime()),
+      });
+      cursor.setDate(cursor.getDate() + intervalDays);
+      index = Math.round((cursor.getTime() - firstLabelTime) / intervalMs);
+    }
+
+    return ticks;
+  }
+
+  _dayTickInterval(startMs, endMs, width, labelWidth) {
+    const spanMs = endMs - startMs;
+    const intervals = [1, 2, 3, 7, 14, 30, 90, 365];
+
+    for (const intervalDays of intervals) {
+      const spacing = (intervalDays * 86400000 / spanMs) * width;
+      if (spacing >= labelWidth + 8) return intervalDays;
+    }
+
+    return intervals[intervals.length - 1];
+  }
+
+  _timeTicks(startMs, endMs, mode = "adaptive") {
+    const ticks = [];
+    const width = this._axisWidth || 320;
+    const labelWidth = 70;
+    const intervalHours = this._timeTickInterval(startMs, endMs);
+    if (mode === "adaptive" && this._timeTicksPerDay(startMs, endMs, intervalHours) < 3) return ticks;
+
+    const cursor = this._roundedIntervalDate(startMs, intervalHours);
+    const firstLabelTime = cursor.getTime();
+    let index = 0;
+
+    while (cursor.getTime() <= endMs) {
+      const time = cursor.getTime();
+      const left = this._flowLabelLeftPx(index, intervalHours * 3600000, startMs, endMs, width);
+      if (left + labelWidth > width) break;
+      ticks.push({
+        time,
+        leftPercent: (left / width) * 100,
+        label: this._formatTime(time),
+      });
+      cursor.setHours(cursor.getHours() + intervalHours);
+      index = Math.round((cursor.getTime() - firstLabelTime) / (intervalHours * 3600000));
+    }
+
+    if (ticks.length === 0) {
+      const roundedEnd = this._roundedIntervalDate(startMs, intervalHours).getTime();
+      ticks.push({
+        time: roundedEnd,
+        leftPercent: 0,
+        label: this._formatTime(roundedEnd),
+      });
+    }
+
+    return ticks;
+  }
+
+  _timeTicksPerDay(startMs, endMs, intervalHours) {
+    const days = Math.max(1, (endMs - startMs) / 86400000);
+    return this._timeTickCount(startMs, endMs, intervalHours) / days;
+  }
+
+  _tickLeftPercent(tick, startMs, spanMs) {
+    if (Number.isFinite(tick.leftPercent)) return tick.leftPercent;
+    return ((tick.time - startMs) / spanMs) * 100;
+  }
+
+  _flowLabelLeftPx(index, intervalMs, startMs, endMs, width) {
+    return index * (intervalMs / (endMs - startMs)) * width;
+  }
+
+  _roundedIntervalDate(value, intervalHours) {
+    const date = new Date(value);
+    const hour = date.getHours() + date.getMinutes() / 60 + date.getSeconds() / 3600;
+    const roundedHour = Math.round(hour / intervalHours) * intervalHours;
+    date.setMinutes(0, 0, 0);
+    date.setHours(roundedHour);
+    return date;
+  }
+
+  _timeTickInterval(startMs, endMs) {
+    const width = this._axisWidth || 320;
+    const maxTicks = Math.max(2, Math.floor(width / 82));
+    const intervals = [1, 2, 4, 6, 8, 12, 24, 48, 72, 168];
+
+    for (const intervalHours of intervals) {
+      if (this._timeTickCount(startMs, endMs, intervalHours) <= maxTicks) {
+        return intervalHours;
+      }
+    }
+
+    return intervals[intervals.length - 1];
+  }
+
+  _timeTickCount(startMs, endMs, intervalHours) {
+    const cursor = new Date(startMs);
+    cursor.setMinutes(0, 0, 0);
+    cursor.setHours(Math.ceil(cursor.getHours() / intervalHours) * intervalHours);
+
+    if (cursor.getTime() < startMs) {
+      cursor.setHours(cursor.getHours() + intervalHours);
+    }
+
+    let count = 0;
+    while (cursor.getTime() <= endMs) {
+      count += 1;
+      cursor.setHours(cursor.getHours() + intervalHours);
+    }
+    return count;
+  }
+
+  _formatDay(value) {
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+    }).format(new Date(value));
+  }
+
   _formatDuration(ms) {
     const totalSeconds = Math.max(0, Math.round(ms / 1000));
     const days = Math.floor(totalSeconds / 86400);
@@ -676,6 +904,33 @@ class HaStateHistoryCard extends HTMLElement {
     if (hours > 0) return `${hours}h ${minutes}m`;
     if (minutes > 0) return `${minutes}m ${seconds}s`;
     return `${seconds}s`;
+  }
+
+  _observeAxis() {
+    const axis = this.shadowRoot.querySelector(".axis-track");
+    if (!axis) return;
+
+    const updateWidth = (width) => {
+      const nextWidth = Math.round(width);
+      if (!nextWidth || Math.abs(nextWidth - this._axisWidth) < 12) return;
+
+      this._axisWidth = nextWidth;
+      this._render();
+    };
+
+    if (!this._resizeObserver && "ResizeObserver" in window) {
+      this._resizeObserver = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        if (entry) updateWidth(entry.contentRect.width);
+      });
+    }
+
+    if (this._resizeObserver) {
+      this._resizeObserver.disconnect();
+      this._resizeObserver.observe(axis);
+    } else {
+      requestAnimationFrame(() => updateWidth(axis.clientWidth));
+    }
   }
 
   _scheduleLabelSync() {
@@ -935,6 +1190,15 @@ class HaStateHistoryCardEditor extends HTMLElement {
                 ${this._option("center", "Center", config.legend)}
                 ${this._option("right", "Right", config.legend)}
                 ${this._option("off", "Off", config.legend)}
+              </select>
+            </label>
+            <label>
+              Labels
+              <select data-field="label">
+                ${this._option("adaptive", "Adaptive", config.label || "adaptive")}
+                ${this._option("day", "Day", config.label)}
+                ${this._option("hour", "Hour", config.label)}
+                ${this._option("off", "Off", config.label)}
               </select>
             </label>
           </div>
