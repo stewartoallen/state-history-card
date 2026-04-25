@@ -469,10 +469,11 @@ class StateHistoryCard extends HTMLElement {
           display: none;
           max-width: min(320px, calc(100vw - 24px));
           padding: 8px 10px;
-          border-radius: 4px;
-          background: var(--primary-text-color);
-          color: var(--card-background-color);
-          box-shadow: 0 6px 18px rgb(0 0 0 / 24%);
+          border: 1px solid var(--divider-color);
+          border-radius: 6px;
+          background: var(--mdc-theme-surface, var(--ha-card-background, var(--card-background-color)));
+          color: var(--primary-text-color);
+          box-shadow: var(--ha-card-box-shadow, 0 6px 18px rgb(0 0 0 / 24%));
           font-size: 12px;
           line-height: 1.35;
           pointer-events: none;
