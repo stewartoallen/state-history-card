@@ -391,6 +391,8 @@ class StateHistoryCard extends HTMLElement {
         .chart {
           display: grid;
           gap: 10px;
+          position: relative;
+          z-index: 1;
         }
 
         .row {
@@ -509,6 +511,18 @@ class StateHistoryCard extends HTMLElement {
           position: relative;
           min-width: 0;
           min-height: 28px;
+        }
+
+        .axis-tick {
+          position: absolute;
+          bottom: 24px;
+          left: var(--tick-center);
+          width: 1px;
+          height: var(--tick-height, 0px);
+          background: var(--divider-color);
+          opacity: 0.45;
+          transform: translateX(-0.5px);
+          pointer-events: none;
         }
 
         .day-label {
@@ -648,6 +662,10 @@ class StateHistoryCard extends HTMLElement {
                     ${dayTicks
                       .map(
                         (tick) => `
+                          <span
+                            class="axis-tick"
+                            style="--tick-center:${this._tickCenterPercent(tick, startMs, spanMs)}%;--tick-height:${this._axisTickHeight()}px"
+                          ></span>
                           <span class="day-label" style="--tick-left:${this._tickLeftPercent(tick, startMs, spanMs)}%">
                             ${this._escape(tick.label)}
                           </span>
@@ -657,6 +675,10 @@ class StateHistoryCard extends HTMLElement {
                     ${timeTicks
                       .map(
                         (tick) => `
+                          <span
+                            class="axis-tick"
+                            style="--tick-center:${this._tickCenterPercent(tick, startMs, spanMs)}%;--tick-height:${this._axisTickHeight()}px"
+                          ></span>
                           <span
                             class="time-label"
                             style="--tick-left:${this._tickLeftPercent(tick, startMs, spanMs)}%"
@@ -764,25 +786,18 @@ class StateHistoryCard extends HTMLElement {
     const width = this._axisWidth || 320;
     const labelWidth = 58;
     const intervalDays = this._dayTickInterval(startMs, endMs, width, labelWidth);
-    const intervalMs = intervalDays * 86400000;
     const cursor = new Date(startMs);
     cursor.setHours(0, 0, 0, 0);
-    const firstLabelTime = cursor.getTime();
-    let index = 0;
 
     while (cursor.getTime() <= endMs) {
-      const left = this._flowLabelLeftPx(index, intervalMs, startMs, endMs, width);
-      if (left + labelWidth > width) break;
       ticks.push({
         time: cursor.getTime(),
-        leftPercent: (left / width) * 100,
         label: this._formatDay(cursor.getTime()),
       });
       cursor.setDate(cursor.getDate() + intervalDays);
-      index = Math.round((cursor.getTime() - firstLabelTime) / intervalMs);
     }
 
-    return ticks;
+    return this._centeredNonOverlappingTicks(ticks, startMs, endMs, labelWidth);
   }
 
   _dayTickInterval(startMs, endMs, width, labelWidth) {
@@ -805,32 +820,25 @@ class StateHistoryCard extends HTMLElement {
     if (mode === "adaptive" && this._timeTicksPerDay(startMs, endMs, intervalHours) < 3) return ticks;
 
     const cursor = this._roundedIntervalDate(startMs, intervalHours);
-    const firstLabelTime = cursor.getTime();
-    let index = 0;
 
     while (cursor.getTime() <= endMs) {
       const time = cursor.getTime();
-      const left = this._flowLabelLeftPx(index, intervalHours * 3600000, startMs, endMs, width);
-      if (left + labelWidth > width) break;
       ticks.push({
         time,
-        leftPercent: (left / width) * 100,
         label: this._formatTime(time),
       });
       cursor.setHours(cursor.getHours() + intervalHours);
-      index = Math.round((cursor.getTime() - firstLabelTime) / (intervalHours * 3600000));
     }
 
     if (ticks.length === 0) {
       const roundedEnd = this._roundedIntervalDate(startMs, intervalHours).getTime();
       ticks.push({
         time: roundedEnd,
-        leftPercent: 0,
         label: this._formatTime(roundedEnd),
       });
     }
 
-    return ticks;
+    return this._centeredNonOverlappingTicks(ticks, startMs, endMs, labelWidth);
   }
 
   _timeTicksPerDay(startMs, endMs, intervalHours) {
@@ -843,8 +851,39 @@ class StateHistoryCard extends HTMLElement {
     return ((tick.time - startMs) / spanMs) * 100;
   }
 
-  _flowLabelLeftPx(index, intervalMs, startMs, endMs, width) {
-    return index * (intervalMs / (endMs - startMs)) * width;
+  _tickCenterPercent(tick, startMs, spanMs) {
+    return ((tick.time - startMs) / spanMs) * 100;
+  }
+
+  _axisTickHeight() {
+    const rows = this._entityIds().length;
+    const rowHeight = 18;
+    const rowGap = 10;
+    return rows > 0 ? rows * rowHeight + Math.max(0, rows - 1) * rowGap + 3 : 0;
+  }
+
+  _centeredNonOverlappingTicks(ticks, startMs, endMs, labelWidth) {
+    const width = this._axisWidth || 320;
+    const minGap = 8;
+    const kept = [];
+    let lastRight = -Infinity;
+
+    for (const tick of ticks) {
+      const center = ((tick.time - startMs) / (endMs - startMs)) * width;
+      const left = center - labelWidth / 2;
+      const right = left + labelWidth;
+
+      if (left < 0 || right > width) continue;
+      if (left < lastRight + minGap) continue;
+
+      kept.push({
+        ...tick,
+        leftPercent: (left / width) * 100,
+      });
+      lastRight = right;
+    }
+
+    return kept;
   }
 
   _roundedIntervalDate(value, intervalHours) {
