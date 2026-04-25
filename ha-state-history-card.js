@@ -759,10 +759,14 @@ class HaStateHistoryCardEditor extends HTMLElement {
     this._entityDraft = [];
     this._colorDraft = [];
     this._labelDraft = [];
+    this._configDebounce = undefined;
+    this.shadowRoot.addEventListener("focusout", () => this._flushConfigChangeSoon());
   }
 
   setConfig(config) {
     this._config = { ...config };
+    if (this._isEditorFieldFocused()) return;
+
     this._entityDraft = this._entityConfigs(config.entities || []);
     this._colorDraft = this._mapEntries(config.state_colors || config.colors || {});
     this._labelDraft = this._mapEntries(config.state_labels || config.labels || {});
@@ -844,6 +848,10 @@ class HaStateHistoryCardEditor extends HTMLElement {
           grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto;
         }
 
+        .map-row.color-row {
+          grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto auto;
+        }
+
         button {
           min-height: 40px;
           border: 1px solid var(--divider-color);
@@ -858,6 +866,30 @@ class HaStateHistoryCardEditor extends HTMLElement {
         button[data-action^="remove"] {
           width: 40px;
           padding: 0;
+        }
+
+        .color-preview {
+          width: 40px;
+          height: 40px;
+          border: 1px solid var(--divider-color);
+          border-radius: 4px;
+          background:
+            linear-gradient(45deg, rgb(128 128 128 / 22%) 25%, transparent 25%),
+            linear-gradient(-45deg, rgb(128 128 128 / 22%) 25%, transparent 25%),
+            linear-gradient(45deg, transparent 75%, rgb(128 128 128 / 22%) 75%),
+            linear-gradient(-45deg, transparent 75%, rgb(128 128 128 / 22%) 75%);
+          background-color: var(--card-background-color);
+          background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+          background-size: 16px 16px;
+          overflow: hidden;
+        }
+
+        .color-preview::after {
+          display: block;
+          width: 100%;
+          height: 100%;
+          background: var(--preview-color, transparent);
+          content: "";
         }
 
         .add {
@@ -979,7 +1011,7 @@ class HaStateHistoryCardEditor extends HTMLElement {
 
   _mapRow(type, key, value, index) {
     return `
-      <div class="row map-row">
+      <div class="row map-row ${type === "color" ? "color-row" : ""}">
         <label>
           State
           <input data-map-type="${type}" data-map-index="${index}" data-map-field="key" value="${this._escapeAttr(
@@ -993,24 +1025,36 @@ class HaStateHistoryCardEditor extends HTMLElement {
           )}" placeholder="${type === "color" ? "#22c55e" : "Home"}">
         </label>
         <button data-action="remove-${type}" data-index="${index}" type="button" aria-label="Remove ${type}">x</button>
+        ${
+          type === "color"
+            ? `<span class="color-preview" style="--preview-color:${this._escapeAttr(value || "transparent")}"></span>`
+            : ""
+        }
       </div>
     `;
   }
 
   _handleInput(event) {
     const target = event.target;
+    const debounce = event.type === "input";
     if (target.dataset.field) {
-      this._updateField(target.dataset.field, target.value, target.type);
+      this._updateField(target.dataset.field, target.value, target.type, debounce);
       return;
     }
 
     if (target.dataset.entityField) {
-      this._updateEntity(Number(target.dataset.entityIndex), target.dataset.entityField, target.value);
+      this._updateEntity(Number(target.dataset.entityIndex), target.dataset.entityField, target.value, debounce);
       return;
     }
 
     if (target.dataset.mapField) {
-      this._updateMap(target.dataset.mapType, Number(target.dataset.mapIndex), target.dataset.mapField, target.value);
+      this._updateMap(
+        target.dataset.mapType,
+        Number(target.dataset.mapIndex),
+        target.dataset.mapField,
+        target.value,
+        debounce
+      );
     }
   }
 
@@ -1027,7 +1071,7 @@ class HaStateHistoryCardEditor extends HTMLElement {
     if (action === "remove-label") this._removeMapEntry("label", Number(button.dataset.index));
   }
 
-  _updateField(field, value, type) {
+  _updateField(field, value, type, debounce = false) {
     const config = { ...this._config };
     if (value === "" && field !== "title") {
       delete config[field];
@@ -1038,13 +1082,13 @@ class HaStateHistoryCardEditor extends HTMLElement {
     } else {
       config[field] = value;
     }
-    this._configChanged(config);
+    this._configChanged(config, false, debounce);
   }
 
-  _updateEntity(index, field, value) {
+  _updateEntity(index, field, value, debounce = false) {
     this._entityDraft[index] = { ...(this._entityDraft[index] || {}), [field]: value };
     if (field === "name" && value === "") delete this._entityDraft[index].name;
-    this._configChanged({ ...this._config, entities: this._entityDraft.filter((entry) => entry.entity) });
+    this._configChanged({ ...this._config, entities: this._entityDraft.filter((entry) => entry.entity) }, false, debounce);
   }
 
   _addEntity() {
@@ -1057,12 +1101,13 @@ class HaStateHistoryCardEditor extends HTMLElement {
     this._configChanged({ ...this._config, entities: this._entityDraft.filter((entry) => entry.entity) }, true);
   }
 
-  _updateMap(type, index, field, value) {
+  _updateMap(type, index, field, value, debounce = false) {
     const configKey = type === "color" ? "state_colors" : "state_labels";
     const entries = type === "color" ? this._colorDraft : this._labelDraft;
     entries[index] = entries[index] || ["", ""];
     entries[index][field === "key" ? 0 : 1] = value;
-    this._configChanged({ ...this._config, [configKey]: this._entriesToMap(entries) });
+    this._updateColorPreview(type, index, entries[index][1]);
+    this._configChanged({ ...this._config, [configKey]: this._entriesToMap(entries) }, false, debounce);
   }
 
   _addMapEntry(type) {
@@ -1078,16 +1123,53 @@ class HaStateHistoryCardEditor extends HTMLElement {
     this._configChanged({ ...this._config, [configKey]: this._entriesToMap(entries) }, true);
   }
 
-  _configChanged(config, rerender = false) {
+  _configChanged(config, rerender = false, debounce = false) {
     this._config = config;
+    if (this._configDebounce) clearTimeout(this._configDebounce);
+
+    if (debounce) {
+      this._configDebounce = setTimeout(() => {
+        this._configDebounce = undefined;
+        this._emitConfigChanged();
+      }, 450);
+    } else {
+      this._emitConfigChanged();
+    }
+
+    if (rerender) this._render();
+  }
+
+  _flushConfigChangeSoon() {
+    setTimeout(() => {
+      if (this._isEditorFieldFocused() || !this._configDebounce) return;
+
+      clearTimeout(this._configDebounce);
+      this._configDebounce = undefined;
+      this._emitConfigChanged();
+    });
+  }
+
+  _isEditorFieldFocused() {
+    const active = this.shadowRoot.activeElement;
+    return active instanceof HTMLInputElement || active instanceof HTMLSelectElement;
+  }
+
+  _emitConfigChanged() {
     this.dispatchEvent(
       new CustomEvent("config-changed", {
-        detail: { config },
+        detail: { config: this._config },
         bubbles: true,
         composed: true,
       })
     );
-    if (rerender) this._render();
+  }
+
+  _updateColorPreview(type, index, value) {
+    if (type !== "color") return;
+
+    const row = this.shadowRoot.querySelector(`.color-row input[data-map-index="${index}"]`)?.closest(".color-row");
+    const preview = row?.querySelector(".color-preview");
+    if (preview) preview.style.setProperty("--preview-color", value || "transparent");
   }
 
   _entityConfigs(entities) {
