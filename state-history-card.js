@@ -1,11 +1,11 @@
-class HaStateHistoryCard extends HTMLElement {
+class StateHistoryCard extends HTMLElement {
   static getConfigElement() {
-    return document.createElement("ha-state-history-card-editor");
+    return document.createElement("state-history-card-editor");
   }
 
   static getStubConfig() {
     return {
-      type: "custom:ha-state-history-card",
+      type: "custom:state-history-card",
       hours_to_show: 24,
       entities: [],
     };
@@ -1005,7 +1005,7 @@ class HaStateHistoryCard extends HTMLElement {
   }
 }
 
-class HaStateHistoryCardEditor extends HTMLElement {
+class StateHistoryCardEditor extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -1526,12 +1526,12 @@ const DEFAULT_STATE_LABELS = {
   },
 };
 
-customElements.define("ha-state-history-card-editor", HaStateHistoryCardEditor);
-customElements.define("ha-state-history-card", HaStateHistoryCard);
+customElements.define("state-history-card-editor", StateHistoryCardEditor);
+customElements.define("state-history-card", StateHistoryCard);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
-  type: "ha-state-history-card",
-  name: "HA State History Card",
+  type: "state-history-card",
+  name: "State History Card",
   description: "History graph replacement with explicit colors per state value.",
 });

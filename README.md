@@ -1,9 +1,9 @@
-# HA State History Card
+# State History Card
 
 Lovelace history graph replacement focused on discrete states and explicit colors per state value.
 
 ```yaml
-type: custom:ha-state-history-card
+type: custom:state-history-card
 title: Presence
 title_position: left
 title_size: 24px
