@@ -7,7 +7,7 @@ type: custom:ha-state-history-card
 title: Presence
 hours_to_show: 24
 refresh_interval: 300
-show_legend: true
+legend: on
 state_colors:
   "on|Home": "#22c55e"
   "off|Away": "#64748b"
@@ -32,7 +32,8 @@ Options:
 - `entities`: Required. Same shape as the native history graph card: entity ID strings or objects with `entity` and optional `name`.
 - `hours_to_show`: Optional. Defaults to `24`.
 - `refresh_interval`: Optional. Seconds between history API refreshes. Defaults to `300`.
-- `show_legend`: Optional. Set to `false` to hide the state legend.
+- `legend`: Optional. State legend display. Use `on`, `off`, `left`, `center`, or `right`. `on` and `left` are synonyms. Defaults to `on`.
+- `show_legend`: Optional legacy alias. Set to `false` to hide the state legend.
 - `state_colors`: Optional. Global state-to-color map.
 - `state_labels`: Optional. Global raw-state-to-label map.
 - `entities[].state_colors`: Optional. Per-entity state-to-color map. This overrides the global map for that entity.

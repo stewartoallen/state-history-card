@@ -33,6 +33,7 @@ class HaStateHistoryCard extends HTMLElement {
     this._config = {
       hours_to_show: 24,
       refresh_interval: 300,
+      legend: "on",
       show_legend: true,
       state_colors: {},
       state_labels: {},
@@ -280,6 +281,7 @@ class HaStateHistoryCard extends HTMLElement {
       intervals: this._intervalsFor(entry, startMs, endMs),
     }));
     const states = this._legendStates(rows);
+    const legendPosition = this._legendPosition();
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -440,9 +442,18 @@ class HaStateHistoryCard extends HTMLElement {
           display: flex;
           flex-wrap: wrap;
           gap: 8px 14px;
+          justify-content: flex-start;
           margin-top: 14px;
           color: var(--secondary-text-color);
           font-size: 12px;
+        }
+
+        .legend[data-position="center"] {
+          justify-content: center;
+        }
+
+        .legend[data-position="right"] {
+          justify-content: flex-end;
         }
 
         .legend-item {
@@ -536,9 +547,9 @@ class HaStateHistoryCard extends HTMLElement {
             </div>
           </div>
           ${
-            this._config.show_legend === false
+            legendPosition === "off"
               ? ""
-              : `<div class="legend">
+              : `<div class="legend" data-position="${this._escapeAttr(legendPosition)}">
                   ${states
                     .map(
                       ({ label, color }) => `
@@ -556,6 +567,16 @@ class HaStateHistoryCard extends HTMLElement {
       </ha-card>
     `;
     this._scheduleLabelSync();
+  }
+
+  _legendPosition() {
+    if (this._config.show_legend === false) return "off";
+
+    const value = String(this._config.legend || "on").toLowerCase();
+    if (value === "off" || value === "false" || value === "none" || value === "hidden") return "off";
+    if (value === "center" || value === "middle") return "center";
+    if (value === "right" || value === "end") return "right";
+    return "left";
   }
 
   _legendStates(rows) {
