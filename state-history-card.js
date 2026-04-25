@@ -25,13 +25,20 @@ class StateHistoryCard extends HTMLElement {
     this._rangeStartMs = undefined;
     this._rangeEndMs = undefined;
     this._lastStateSignature = "";
-    this._resizeObserver = undefined;
+    this._activeTooltipSegment = undefined;
+    this._tooltipPinned = false;
+    this._handleDocumentPointerDown = (event) => {
+      if (!event.composedPath().includes(this)) this._hideTooltip();
+    };
     this.shadowRoot.addEventListener("pointermove", (event) => this._handlePointerMove(event));
-    this.shadowRoot.addEventListener("pointerleave", () => this._hideTooltip());
+    this.shadowRoot.addEventListener("pointerdown", (event) => this._handlePointerDown(event));
+    this.shadowRoot.addEventListener("pointerleave", () => {
+      if (!this._tooltipPinned) this._hideTooltip();
+    });
   }
 
   disconnectedCallback() {
-    if (this._resizeObserver) this._resizeObserver.disconnect();
+    document.removeEventListener("pointerdown", this._handleDocumentPointerDown);
     if (this._labelFrame) cancelAnimationFrame(this._labelFrame);
   }
 
@@ -44,7 +51,7 @@ class StateHistoryCard extends HTMLElement {
       hours_to_show: 24,
       refresh_interval: 300,
       legend: "on",
-      label: "adaptive",
+      label: "on",
       title_position: "left",
       title_size: undefined,
       show_legend: true,
@@ -130,6 +137,7 @@ class StateHistoryCard extends HTMLElement {
     this._render();
 
     const end = new Date();
+    end.setSeconds(0, 0);
     const start = new Date(end.getTime() - this._config.hours_to_show * 60 * 60 * 1000);
     this._rangeStartMs = start.getTime();
     this._rangeEndMs = end.getTime();
@@ -319,7 +327,9 @@ class StateHistoryCard extends HTMLElement {
   _render() {
     if (!this._config) return;
 
-    const fallbackEndMs = Date.now();
+    this._axisWidth = this._estimatedAxisWidth();
+
+    const fallbackEndMs = this._roundedNowMs();
     const endMs = this._rangeEndMs || fallbackEndMs;
     const startMs = this._rangeStartMs || endMs - this._config.hours_to_show * 60 * 60 * 1000;
     const spanMs = endMs - startMs;
@@ -334,11 +344,7 @@ class StateHistoryCard extends HTMLElement {
     const titlePosition = this._positionValue(this._config.title_position, "left");
     const titleSize = this._titleSize();
     const labelMode = this._labelMode();
-    const timeTicks = labelMode === "hour" || labelMode === "adaptive" ? this._timeTicks(startMs, endMs, labelMode) : [];
-    const dayTicks =
-      labelMode === "day" || (labelMode === "adaptive" && timeTicks.length === 0)
-        ? this._dayTicks(startMs, endMs)
-        : [];
+    const axisTicks = labelMode === "on" ? this._axisTicks(startMs, endMs) : [];
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -510,12 +516,12 @@ class StateHistoryCard extends HTMLElement {
         .axis-track {
           position: relative;
           min-width: 0;
-          min-height: 28px;
+          min-height: 24px;
         }
 
         .axis-tick {
           position: absolute;
-          bottom: 24px;
+          bottom: 22px;
           left: var(--tick-center);
           width: 1px;
           height: var(--tick-height, 0px);
@@ -525,22 +531,11 @@ class StateHistoryCard extends HTMLElement {
           pointer-events: none;
         }
 
-        .day-label {
-          position: absolute;
-          top: 0;
-          left: var(--tick-left);
-          width: 58px;
-          overflow: hidden;
-          text-align: center;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .time-label {
+        .axis-label {
           position: absolute;
           bottom: 0;
           left: var(--tick-left);
-          width: 70px;
+          width: var(--axis-label-width);
           overflow: hidden;
           text-align: center;
           text-overflow: ellipsis;
@@ -659,29 +654,16 @@ class StateHistoryCard extends HTMLElement {
                 <div class="axis">
                   <div></div>
                   <div class="axis-track">
-                    ${dayTicks
+                    ${axisTicks
                       .map(
                         (tick) => `
                           <span
                             class="axis-tick"
-                            style="--tick-center:${this._tickCenterPercent(tick, startMs, spanMs)}%;--tick-height:${this._axisTickHeight()}px"
-                          ></span>
-                          <span class="day-label" style="--tick-left:${this._tickLeftPercent(tick, startMs, spanMs)}%">
-                            ${this._escape(tick.label)}
-                          </span>
-                        `
-                      )
-                      .join("")}
-                    ${timeTicks
-                      .map(
-                        (tick) => `
-                          <span
-                            class="axis-tick"
-                            style="--tick-center:${this._tickCenterPercent(tick, startMs, spanMs)}%;--tick-height:${this._axisTickHeight()}px"
+                            style="--tick-center:${tick.centerPercent}%;--tick-height:${this._axisTickHeight()}px"
                           ></span>
                           <span
-                            class="time-label"
-                            style="--tick-left:${this._tickLeftPercent(tick, startMs, spanMs)}%"
+                            class="axis-label"
+                            style="--tick-left:${tick.leftPercent}%;--axis-label-width:${tick.labelWidth}px"
                           >
                             ${this._escape(tick.label)}
                           </span>
@@ -711,7 +693,6 @@ class StateHistoryCard extends HTMLElement {
         <div class="tooltip" role="tooltip"></div>
       </ha-card>
     `;
-    this._observeAxis();
     this._scheduleLabelSync();
   }
 
@@ -724,11 +705,9 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _labelMode() {
-    const value = String(this._config.label || "adaptive").trim().toLowerCase();
+    const value = String(this._config.label || "on").trim().toLowerCase();
     if (value === "off" || value === "false" || value === "none" || value === "hidden") return "off";
-    if (value === "day" || value === "days") return "day";
-    if (value === "hour" || value === "hours" || value === "time") return "hour";
-    return "adaptive";
+    return "on";
   }
 
   _positionValue(value, fallback) {
@@ -781,78 +760,10 @@ class StateHistoryCard extends HTMLElement {
     }).format(new Date(value));
   }
 
-  _dayTicks(startMs, endMs) {
-    const ticks = [];
-    const width = this._axisWidth || 320;
-    const labelWidth = 58;
-    const intervalDays = this._dayTickInterval(startMs, endMs, width, labelWidth);
-    const cursor = new Date(startMs);
-    cursor.setHours(0, 0, 0, 0);
-
-    while (cursor.getTime() <= endMs) {
-      ticks.push({
-        time: cursor.getTime(),
-        label: this._formatDay(cursor.getTime()),
-      });
-      cursor.setDate(cursor.getDate() + intervalDays);
-    }
-
-    return this._centeredNonOverlappingTicks(ticks, startMs, endMs, labelWidth);
-  }
-
-  _dayTickInterval(startMs, endMs, width, labelWidth) {
-    const spanMs = endMs - startMs;
-    const intervals = [1, 2, 3, 7, 14, 30, 90, 365];
-
-    for (const intervalDays of intervals) {
-      const spacing = (intervalDays * 86400000 / spanMs) * width;
-      if (spacing >= labelWidth + 8) return intervalDays;
-    }
-
-    return intervals[intervals.length - 1];
-  }
-
-  _timeTicks(startMs, endMs, mode = "adaptive") {
-    const ticks = [];
-    const width = this._axisWidth || 320;
-    const labelWidth = 70;
-    const intervalHours = this._timeTickInterval(startMs, endMs);
-    if (mode === "adaptive" && this._timeTicksPerDay(startMs, endMs, intervalHours) < 3) return ticks;
-
-    const cursor = this._roundedIntervalDate(startMs, intervalHours);
-
-    while (cursor.getTime() <= endMs) {
-      const time = cursor.getTime();
-      ticks.push({
-        time,
-        label: this._formatTime(time),
-      });
-      cursor.setHours(cursor.getHours() + intervalHours);
-    }
-
-    if (ticks.length === 0) {
-      const roundedEnd = this._roundedIntervalDate(startMs, intervalHours).getTime();
-      ticks.push({
-        time: roundedEnd,
-        label: this._formatTime(roundedEnd),
-      });
-    }
-
-    return this._centeredNonOverlappingTicks(ticks, startMs, endMs, labelWidth);
-  }
-
-  _timeTicksPerDay(startMs, endMs, intervalHours) {
-    const days = Math.max(1, (endMs - startMs) / 86400000);
-    return this._timeTickCount(startMs, endMs, intervalHours) / days;
-  }
-
-  _tickLeftPercent(tick, startMs, spanMs) {
-    if (Number.isFinite(tick.leftPercent)) return tick.leftPercent;
-    return ((tick.time - startMs) / spanMs) * 100;
-  }
-
-  _tickCenterPercent(tick, startMs, spanMs) {
-    return ((tick.time - startMs) / spanMs) * 100;
+  _roundedNowMs() {
+    const now = new Date();
+    now.setSeconds(0, 0);
+    return now.getTime();
   }
 
   _axisTickHeight() {
@@ -862,72 +773,114 @@ class StateHistoryCard extends HTMLElement {
     return rows > 0 ? rows * rowHeight + Math.max(0, rows - 1) * rowGap + 3 : 0;
   }
 
+  _axisTicks(startMs, endMs) {
+    const width = this._axisWidth || 320;
+    const labelWidth = width < 260 ? 64 : 76;
+    const intervals = [1, 2, 3, 4, 6, 8, 12, 24, 48, 72, 168, 336, 720, 2160, 8760];
+
+    for (const intervalHours of intervals) {
+      const ticks = this._candidateAxisTicks(startMs, endMs, intervalHours);
+      const kept = this._centeredNonOverlappingTicks(ticks, startMs, endMs, labelWidth);
+      const visibleTickCount = ticks.filter((tick) => this._tickCanFit(tick, startMs, endMs, labelWidth)).length;
+
+      if (kept.length > 0 && kept.length === visibleTickCount) return kept;
+    }
+
+    return this._centeredNonOverlappingTicks(
+      this._candidateAxisTicks(startMs, endMs, intervals[intervals.length - 1]),
+      startMs,
+      endMs,
+      labelWidth
+    );
+  }
+
+  _candidateAxisTicks(startMs, endMs, intervalHours) {
+    const ticks = [];
+    const cursor = this._intervalBoundaryDate(startMs, intervalHours);
+
+    while (cursor.getTime() <= endMs) {
+      const time = cursor.getTime();
+      const isMidnight = this._isMidnight(time);
+      ticks.push({
+        time,
+        label: isMidnight ? this._formatDay(time, startMs, endMs) : this._formatTime(time),
+        priority: isMidnight ? 1 : 0,
+      });
+      cursor.setHours(cursor.getHours() + intervalHours);
+    }
+
+    return ticks;
+  }
+
+  _tickCanFit(tick, startMs, endMs, labelWidth) {
+    const width = this._axisWidth || 320;
+    const center = ((tick.time - startMs) / (endMs - startMs)) * width;
+    const left = center - labelWidth / 2;
+    const right = left + labelWidth;
+    return tick.time >= startMs && tick.time <= endMs && left >= 0 && right <= width;
+  }
+
   _centeredNonOverlappingTicks(ticks, startMs, endMs, labelWidth) {
     const width = this._axisWidth || 320;
+    const spanMs = endMs - startMs;
     const minGap = 8;
     const kept = [];
-    let lastRight = -Infinity;
 
     for (const tick of ticks) {
-      const center = ((tick.time - startMs) / (endMs - startMs)) * width;
+      const center = ((tick.time - startMs) / spanMs) * width;
       const left = center - labelWidth / 2;
       const right = left + labelWidth;
 
       if (left < 0 || right > width) continue;
-      if (left < lastRight + minGap) continue;
-
-      kept.push({
+      const prepared = {
         ...tick,
+        labelWidth,
+        left,
+        right,
+        centerPercent: (center / width) * 100,
         leftPercent: (left / width) * 100,
-      });
-      lastRight = right;
+      };
+
+      const previous = kept[kept.length - 1];
+      if (previous && left < previous.right + minGap) {
+        if ((tick.priority || 0) > (previous.priority || 0) && right <= width) {
+          kept[kept.length - 1] = prepared;
+        }
+        continue;
+      }
+
+      kept.push(prepared);
     }
 
     return kept;
   }
 
-  _roundedIntervalDate(value, intervalHours) {
+  _intervalBoundaryDate(value, intervalHours) {
     const date = new Date(value);
-    const hour = date.getHours() + date.getMinutes() / 60 + date.getSeconds() / 3600;
-    const roundedHour = Math.round(hour / intervalHours) * intervalHours;
     date.setMinutes(0, 0, 0);
-    date.setHours(roundedHour);
+
+    if (intervalHours < 24) {
+      date.setHours(Math.ceil(date.getHours() / intervalHours) * intervalHours);
+      if (date.getTime() < value) date.setHours(date.getHours() + intervalHours);
+      return date;
+    }
+
+    date.setHours(0, 0, 0, 0);
+    while (date.getTime() < value) {
+      date.setHours(date.getHours() + intervalHours);
+    }
+
     return date;
   }
 
-  _timeTickInterval(startMs, endMs) {
-    const width = this._axisWidth || 320;
-    const maxTicks = Math.max(2, Math.floor(width / 82));
-    const intervals = [1, 2, 4, 6, 8, 12, 24, 48, 72, 168];
-
-    for (const intervalHours of intervals) {
-      if (this._timeTickCount(startMs, endMs, intervalHours) <= maxTicks) {
-        return intervalHours;
-      }
-    }
-
-    return intervals[intervals.length - 1];
+  _isMidnight(value) {
+    const date = new Date(value);
+    return date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0;
   }
 
-  _timeTickCount(startMs, endMs, intervalHours) {
-    const cursor = new Date(startMs);
-    cursor.setMinutes(0, 0, 0);
-    cursor.setHours(Math.ceil(cursor.getHours() / intervalHours) * intervalHours);
-
-    if (cursor.getTime() < startMs) {
-      cursor.setHours(cursor.getHours() + intervalHours);
-    }
-
-    let count = 0;
-    while (cursor.getTime() <= endMs) {
-      count += 1;
-      cursor.setHours(cursor.getHours() + intervalHours);
-    }
-    return count;
-  }
-
-  _formatDay(value) {
-    return new Intl.DateTimeFormat(undefined, {
+  _formatDay(value, startMs = 0, endMs = 0) {
+    const sameWeekRange = endMs - startMs <= 7 * 86400000;
+    return new Intl.DateTimeFormat(undefined, sameWeekRange ? { weekday: "short" } : {
       month: "short",
       day: "numeric",
     }).format(new Date(value));
@@ -946,31 +899,17 @@ class StateHistoryCard extends HTMLElement {
     return `${seconds}s`;
   }
 
-  _observeAxis() {
-    const axis = this.shadowRoot.querySelector(".axis-track");
-    if (!axis) return;
+  _estimatedAxisWidth() {
+    const cardWidth = this.getBoundingClientRect().width;
+    if (!cardWidth) return 320;
 
-    const updateWidth = (width) => {
-      const nextWidth = Math.round(width);
-      if (!nextWidth || Math.abs(nextWidth - this._axisWidth) < 12) return;
+    const compact = cardWidth <= 520;
+    const contentPadding = compact ? 24 : 32;
+    const gap = compact ? 6 : 8;
+    const innerWidth = Math.max(0, cardWidth - contentPadding);
+    const labelWidth = compact ? 68 : Math.max(72, innerWidth * 0.18);
 
-      this._axisWidth = nextWidth;
-      this._render();
-    };
-
-    if (!this._resizeObserver && "ResizeObserver" in window) {
-      this._resizeObserver = new ResizeObserver((entries) => {
-        const entry = entries[0];
-        if (entry) updateWidth(entry.contentRect.width);
-      });
-    }
-
-    if (this._resizeObserver) {
-      this._resizeObserver.disconnect();
-      this._resizeObserver.observe(axis);
-    } else {
-      requestAnimationFrame(() => updateWidth(axis.clientWidth));
-    }
+    return Math.max(120, Math.round(innerWidth - labelWidth - gap));
   }
 
   _scheduleLabelSync() {
@@ -991,16 +930,40 @@ class StateHistoryCard extends HTMLElement {
     }
   }
 
-  _handlePointerMove(event) {
+  _handlePointerDown(event) {
     const segment = event.target.closest?.(".segment");
     if (!segment) {
       this._hideTooltip();
       return;
     }
 
+    if (this._tooltipPinned && this._activeTooltipSegment === segment) {
+      this._hideTooltip();
+      return;
+    }
+
+    this._tooltipPinned = true;
+    document.addEventListener("pointerdown", this._handleDocumentPointerDown);
+    this._showTooltip(segment, event.clientX, event.clientY);
+  }
+
+  _handlePointerMove(event) {
+    if (this._tooltipPinned) return;
+
+    const segment = event.target.closest?.(".segment");
+    if (!segment) {
+      this._hideTooltip();
+      return;
+    }
+
+    this._showTooltip(segment, event.clientX, event.clientY);
+  }
+
+  _showTooltip(segment, clientX, clientY) {
     const tooltip = this.shadowRoot.querySelector(".tooltip");
     if (!tooltip) return;
 
+    this._activeTooltipSegment = segment;
     tooltip.innerHTML = `
       <div class="tooltip-state">${this._escape(segment.dataset.state || "")}</div>
       <div class="tooltip-row"><span>Start</span><span>${this._escape(segment.dataset.start || "")}</span></div>
@@ -1012,14 +975,14 @@ class StateHistoryCard extends HTMLElement {
     const margin = 12;
     const offset = 14;
     const rect = tooltip.getBoundingClientRect();
-    let left = event.clientX + offset;
-    let top = event.clientY + offset;
+    let left = clientX + offset;
+    let top = clientY + offset;
 
     if (left + rect.width + margin > window.innerWidth) {
-      left = event.clientX - rect.width - offset;
+      left = clientX - rect.width - offset;
     }
     if (top + rect.height + margin > window.innerHeight) {
-      top = event.clientY - rect.height - offset;
+      top = clientY - rect.height - offset;
     }
 
     tooltip.style.left = `${Math.max(margin, left)}px`;
@@ -1027,6 +990,9 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _hideTooltip() {
+    this._tooltipPinned = false;
+    this._activeTooltipSegment = undefined;
+    document.removeEventListener("pointerdown", this._handleDocumentPointerDown);
     const tooltip = this.shadowRoot.querySelector(".tooltip");
     if (tooltip) tooltip.dataset.visible = "false";
   }
@@ -1235,9 +1201,7 @@ class StateHistoryCardEditor extends HTMLElement {
             <label>
               Labels
               <select data-field="label">
-                ${this._option("adaptive", "Adaptive", config.label || "adaptive")}
-                ${this._option("day", "Day", config.label)}
-                ${this._option("hour", "Hour", config.label)}
+                ${this._option("on", "On", config.label || "on")}
                 ${this._option("off", "Off", config.label)}
               </select>
             </label>

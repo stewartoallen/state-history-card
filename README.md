@@ -8,7 +8,7 @@ It supports:
 - Optional display label overrides per state.
 - Inline labels on long state segments.
 - Hover details with state, start, stop, and duration.
-- Timeline labels: `off`, `day`, `hour`, or `adaptive`.
+- Timeline labels: `on` or `off`.
 - Configurable title and legend alignment.
 - A visual editor for common options, entity rows, and global state color/label maps.
 
@@ -69,7 +69,7 @@ title_size: 24px
 hours_to_show: 24
 refresh_interval: 300
 legend: on
-label: adaptive
+label: on
 state_colors:
   "on|Home": "#22c55e"
   "off|Away": "#64748b"
@@ -96,7 +96,7 @@ entities:
 | `hours_to_show` | number | `24` | History range in hours. |
 | `refresh_interval` | number | `300` | Seconds between history API refreshes. |
 | `legend` | string | `on` | `on`, `off`, `left`, `center`, or `right`. `on` and `left` are synonyms. |
-| `label` | string | `adaptive` | Timeline labels: `off`, `day`, `hour`, or `adaptive`. Adaptive shows either hours or days, not both. |
+| `label` | string | `on` | Timeline labels: `on` or `off`. Midnight marks show a weekday or date instead of `12:00 AM`. |
 | `state_colors` | object | `{}` | Global state-to-color map. Keys may match raw state, display label, or `|` separated aliases. |
 | `state_labels` | object | `{}` | Global raw-state/display-state-to-label map. Keys may use `|` aliases. |
 | `entities[].state_colors` | object | none | Per-entity state color map. Overrides global colors for that entity. |
