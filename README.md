@@ -20,7 +20,12 @@ This card currently targets discrete state timelines. It is not intended to repl
 
 1. Open HACS in Home Assistant.
 2. Open the three-dot menu and choose **Custom repositories**.
-3. Add this repository URL.
+3. Add this repository URL:
+
+```text
+https://github.com/stewartoallen/state-history-card
+```
+
 4. Select category **Dashboard**.
 5. Install **State History Card**.
 6. Refresh the browser.

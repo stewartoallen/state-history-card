@@ -4,6 +4,10 @@
   "description": "Home Assistant Lovelace state history card with explicit colors per state value.",
   "type": "module",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stewartoallen/state-history-card.git"
+  },
   "scripts": {
     "check": "node --check state-history-card.js"
   },
