@@ -5,6 +5,8 @@ Lovelace history graph replacement focused on discrete states and explicit color
 ```yaml
 type: custom:ha-state-history-card
 title: Presence
+title_position: left
+title_size: 24px
 hours_to_show: 24
 refresh_interval: 300
 legend: on
@@ -30,6 +32,9 @@ entities:
 Options:
 
 - `entities`: Required. Same shape as the native history graph card: entity ID strings or objects with `entity` and optional `name`.
+- `title`: Optional. Omit it to hide the title.
+- `title_position`: Optional. Use `left`, `center`, or `right`. Defaults to `left`.
+- `title_size`: Optional. CSS font size for the title, such as `20px`, `1.1rem`, or a number treated as pixels.
 - `hours_to_show`: Optional. Defaults to `24`.
 - `refresh_interval`: Optional. Seconds between history API refreshes. Defaults to `300`.
 - `legend`: Optional. State legend display. Use `on`, `off`, `left`, `center`, or `right`. `on` and `left` are synonyms. Defaults to `on`.

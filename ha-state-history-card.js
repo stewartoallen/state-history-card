@@ -34,6 +34,8 @@ class HaStateHistoryCard extends HTMLElement {
       hours_to_show: 24,
       refresh_interval: 300,
       legend: "on",
+      title_position: "left",
+      title_size: undefined,
       show_legend: true,
       state_colors: {},
       state_labels: {},
@@ -282,6 +284,8 @@ class HaStateHistoryCard extends HTMLElement {
     }));
     const states = this._legendStates(rows);
     const legendPosition = this._legendPosition();
+    const titlePosition = this._positionValue(this._config.title_position, "left");
+    const titleSize = this._titleSize();
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -300,9 +304,18 @@ class HaStateHistoryCard extends HTMLElement {
         .header {
           color: var(--ha-card-header-color, var(--primary-text-color));
           font-family: var(--ha-card-header-font-family, inherit);
-          font-size: var(--ha-card-header-font-size, 24px);
+          font-size: var(--title-size, var(--ha-card-header-font-size, 24px));
           line-height: 1.2;
           padding: 16px 16px 0;
+          text-align: left;
+        }
+
+        .header[data-position="center"] {
+          text-align: center;
+        }
+
+        .header[data-position="right"] {
+          text-align: right;
         }
 
         .status {
@@ -488,7 +501,13 @@ class HaStateHistoryCard extends HTMLElement {
         }
       </style>
       <ha-card>
-        ${this._config.title ? `<div class="header">${this._escape(this._config.title)}</div>` : ""}
+        ${
+          this._config.title
+            ? `<div class="header" data-position="${this._escapeAttr(
+                titlePosition
+              )}" style="--title-size:${this._escapeAttr(titleSize)}">${this._escape(this._config.title)}</div>`
+            : ""
+        }
         ${
           this._loading || this._error
             ? `<div class="status ${this._error ? "error" : ""}">${
@@ -572,11 +591,26 @@ class HaStateHistoryCard extends HTMLElement {
   _legendPosition() {
     if (this._config.show_legend === false) return "off";
 
-    const value = String(this._config.legend || "on").toLowerCase();
+    const value = String(this._config.legend || "on").trim().toLowerCase();
     if (value === "off" || value === "false" || value === "none" || value === "hidden") return "off";
-    if (value === "center" || value === "middle") return "center";
-    if (value === "right" || value === "end") return "right";
+    return this._positionValue(value, "left");
+  }
+
+  _positionValue(value, fallback) {
+    const normalized = String(value || fallback).trim().toLowerCase();
+    if (normalized === "center" || normalized === "middle") return "center";
+    if (normalized === "right" || normalized === "end") return "right";
     return "left";
+  }
+
+  _titleSize() {
+    const value = this._config.title_size;
+    if (value === undefined || value === null || value === "") {
+      return "var(--ha-card-header-font-size, 24px)";
+    }
+
+    if (typeof value === "number") return `${value}px`;
+    return String(value);
   }
 
   _legendStates(rows) {
