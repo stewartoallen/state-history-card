@@ -20,6 +20,9 @@ class HaStateHistoryCard extends HTMLElement {
     this._loading = false;
     this._error = "";
     this._lastFetchKey = "";
+    this._labelFrame = undefined;
+    this.shadowRoot.addEventListener("pointermove", (event) => this._handlePointerMove(event));
+    this.shadowRoot.addEventListener("pointerleave", () => this._hideTooltip());
   }
 
   setConfig(config) {
@@ -32,6 +35,7 @@ class HaStateHistoryCard extends HTMLElement {
       refresh_interval: 300,
       show_legend: true,
       state_colors: {},
+      state_labels: {},
       ...config,
     };
     this._lastFetchKey = "";
@@ -136,6 +140,26 @@ class HaStateHistoryCard extends HTMLElement {
     return color || this._fallbackColor(state);
   }
 
+  _labelForState(entry, state) {
+    const stateKey = String(state).toLowerCase();
+    const entityLabels = entry.state_labels || entry.labels || {};
+    const globalLabels = this._config.state_labels || this._config.labels || {};
+    const configured =
+      entityLabels[state] ||
+      entityLabels[stateKey] ||
+      globalLabels[state] ||
+      globalLabels[stateKey];
+
+    if (configured) return configured;
+
+    const stateObj = this._hass?.states?.[entry.entity];
+    const domain = entry.entity?.split(".")[0];
+    const deviceClass = stateObj?.attributes?.device_class;
+    const domainLabels = DEFAULT_STATE_LABELS[`${domain}.${deviceClass}`] || DEFAULT_STATE_LABELS[domain];
+
+    return domainLabels?.[stateKey] || DEFAULT_STATE_LABELS.common[stateKey] || String(state);
+  }
+
   _fallbackColor(state) {
     let hash = 0;
     const value = String(state);
@@ -215,7 +239,7 @@ class HaStateHistoryCard extends HTMLElement {
         }
 
         ha-card {
-          overflow: hidden;
+          overflow: visible;
         }
 
         .content {
@@ -280,10 +304,71 @@ class HaStateHistoryCard extends HTMLElement {
 
         .segment {
           position: absolute;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           top: 0;
           bottom: 0;
           min-width: 1px;
           background: var(--segment-color);
+          outline: 0;
+        }
+
+        .segment:hover,
+        .segment:focus-visible {
+          filter: brightness(1.08);
+          z-index: 1;
+        }
+
+        .segment-label {
+          box-sizing: border-box;
+          display: block;
+          max-width: 100%;
+          overflow: hidden;
+          padding: 0 5px;
+          color: var(--text-primary-color, #fff);
+          font-size: 11px;
+          font-weight: 500;
+          line-height: var(--state-history-row-height, 18px);
+          text-overflow: ellipsis;
+          text-shadow: 0 1px 1px rgb(0 0 0 / 45%);
+          white-space: nowrap;
+          pointer-events: none;
+        }
+
+        .segment-label[data-hidden="true"] {
+          visibility: hidden;
+        }
+
+        .tooltip {
+          position: fixed;
+          z-index: 1000;
+          display: none;
+          max-width: min(320px, calc(100vw - 24px));
+          padding: 8px 10px;
+          border-radius: 4px;
+          background: var(--primary-text-color);
+          color: var(--card-background-color);
+          box-shadow: 0 6px 18px rgb(0 0 0 / 24%);
+          font-size: 12px;
+          line-height: 1.35;
+          pointer-events: none;
+          white-space: nowrap;
+        }
+
+        .tooltip[data-visible="true"] {
+          display: block;
+        }
+
+        .tooltip-state {
+          margin-bottom: 4px;
+          font-weight: 600;
+        }
+
+        .tooltip-row {
+          display: flex;
+          justify-content: space-between;
+          gap: 14px;
         }
 
         .axis {
@@ -366,11 +451,25 @@ class HaStateHistoryCard extends HTMLElement {
                           const left = ((interval.start - startMs) / spanMs) * 100;
                           const width = ((interval.end - interval.start) / spanMs) * 100;
                           const color = this._colorForState(entry, interval.state);
-                          return `<div class="segment" title="${this._escape(
-                            `${interval.state}: ${this._formatTime(interval.start)} - ${this._formatTime(interval.end)}`
-                          )}" style="left:${left}%;width:${width}%;--segment-color:${this._escapeAttr(
+                          const label = this._labelForState(entry, interval.state);
+                          return `<div
+                            class="segment"
+                            tabindex="0"
+                            data-state="${this._escapeAttr(label)}"
+                            data-raw-state="${this._escapeAttr(interval.state)}"
+                            data-start="${this._escapeAttr(this._formatDateTime(interval.start))}"
+                            data-end="${this._escapeAttr(this._formatDateTime(interval.end))}"
+                            data-duration="${this._escapeAttr(this._formatDuration(interval.end - interval.start))}"
+                            aria-label="${this._escapeAttr(
+                              `${label}, ${this._formatDateTime(interval.start)} to ${this._formatDateTime(
+                                interval.end
+                              )}, ${this._formatDuration(interval.end - interval.start)}`
+                            )}"
+                            style="left:${left}%;width:${width}%;--segment-color:${this._escapeAttr(
                             color
-                          )}"></div>`;
+                          )}">
+                            <span class="segment-label">${this._escape(label)}</span>
+                          </div>`;
                         })
                         .join("")}
                     </div>
@@ -393,10 +492,10 @@ class HaStateHistoryCard extends HTMLElement {
               : `<div class="legend">
                   ${states
                     .map(
-                      ({ state, color }) => `
+                      ({ label, color }) => `
                         <span class="legend-item">
                           <span class="swatch" style="--swatch-color:${this._escapeAttr(color)}"></span>
-                          <span>${this._escape(state)}</span>
+                          <span>${this._escape(label)}</span>
                         </span>
                       `
                     )
@@ -404,8 +503,10 @@ class HaStateHistoryCard extends HTMLElement {
                 </div>`
           }
         </div>
+        <div class="tooltip" role="tooltip"></div>
       </ha-card>
     `;
+    this._scheduleLabelSync();
   }
 
   _legendStates(rows) {
@@ -415,12 +516,13 @@ class HaStateHistoryCard extends HTMLElement {
         if (!seen.has(interval.state)) {
           seen.set(interval.state, {
             state: interval.state,
+            label: this._labelForState(entry, interval.state),
             color: this._colorForState(entry, interval.state),
           });
         }
       }
     }
-    return [...seen.values()].sort((a, b) => String(a.state).localeCompare(String(b.state)));
+    return [...seen.values()].sort((a, b) => String(a.label).localeCompare(String(b.label)));
   }
 
   _formatTime(value) {
@@ -428,6 +530,87 @@ class HaStateHistoryCard extends HTMLElement {
       hour: "numeric",
       minute: "2-digit",
     }).format(new Date(value));
+  }
+
+  _formatDateTime(value) {
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(new Date(value));
+  }
+
+  _formatDuration(ms) {
+    const totalSeconds = Math.max(0, Math.round(ms / 1000));
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
+  }
+
+  _scheduleLabelSync() {
+    if (this._labelFrame) cancelAnimationFrame(this._labelFrame);
+    this._labelFrame = requestAnimationFrame(() => {
+      this._labelFrame = undefined;
+      this._syncSegmentLabels();
+    });
+  }
+
+  _syncSegmentLabels() {
+    const labels = this.shadowRoot.querySelectorAll(".segment-label");
+    for (const label of labels) {
+      label.dataset.hidden = "false";
+      const segment = label.closest(".segment");
+      const availableWidth = Math.max(0, segment.clientWidth - 8);
+      label.dataset.hidden = label.scrollWidth > availableWidth ? "true" : "false";
+    }
+  }
+
+  _handlePointerMove(event) {
+    const segment = event.target.closest?.(".segment");
+    if (!segment) {
+      this._hideTooltip();
+      return;
+    }
+
+    const tooltip = this.shadowRoot.querySelector(".tooltip");
+    if (!tooltip) return;
+
+    tooltip.innerHTML = `
+      <div class="tooltip-state">${this._escape(segment.dataset.state || "")}</div>
+      <div class="tooltip-row"><span>Start</span><span>${this._escape(segment.dataset.start || "")}</span></div>
+      <div class="tooltip-row"><span>Stop</span><span>${this._escape(segment.dataset.end || "")}</span></div>
+      <div class="tooltip-row"><span>Duration</span><span>${this._escape(segment.dataset.duration || "")}</span></div>
+    `;
+    tooltip.dataset.visible = "true";
+
+    const margin = 12;
+    const offset = 14;
+    const rect = tooltip.getBoundingClientRect();
+    let left = event.clientX + offset;
+    let top = event.clientY + offset;
+
+    if (left + rect.width + margin > window.innerWidth) {
+      left = event.clientX - rect.width - offset;
+    }
+    if (top + rect.height + margin > window.innerHeight) {
+      top = event.clientY - rect.height - offset;
+    }
+
+    tooltip.style.left = `${Math.max(margin, left)}px`;
+    tooltip.style.top = `${Math.max(margin, top)}px`;
+  }
+
+  _hideTooltip() {
+    const tooltip = this.shadowRoot.querySelector(".tooltip");
+    if (tooltip) tooltip.dataset.visible = "false";
   }
 
   _escape(value) {
@@ -453,6 +636,51 @@ const DEFAULT_STATE_COLORS = {
   not_home: "var(--state-person-not-home-color, #9e9e9e)",
   unavailable: "var(--state-unavailable-color, #bdbdbd)",
   unknown: "var(--state-unknown-color, #bdbdbd)",
+};
+
+const DEFAULT_STATE_LABELS = {
+  common: {
+    on: "On",
+    off: "Off",
+    open: "Open",
+    closed: "Closed",
+    home: "Home",
+    not_home: "Away",
+    unavailable: "Unavailable",
+    unknown: "Unknown",
+  },
+  person: {
+    home: "Home",
+    not_home: "Away",
+  },
+  device_tracker: {
+    home: "Home",
+    not_home: "Away",
+  },
+  "binary_sensor.presence": {
+    on: "Home",
+    off: "Away",
+  },
+  "binary_sensor.motion": {
+    on: "Detected",
+    off: "Clear",
+  },
+  "binary_sensor.occupancy": {
+    on: "Detected",
+    off: "Clear",
+  },
+  "binary_sensor.opening": {
+    on: "Open",
+    off: "Closed",
+  },
+  "binary_sensor.door": {
+    on: "Open",
+    off: "Closed",
+  },
+  "binary_sensor.window": {
+    on: "Open",
+    off: "Closed",
+  },
 };
 
 customElements.define("ha-state-history-card", HaStateHistoryCard);

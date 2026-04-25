@@ -13,6 +13,9 @@ state_colors:
   "off": "#64748b"
   unavailable: "#a1a1aa"
   unknown: "#a1a1aa"
+state_labels:
+  "on": Home
+  "off": Away
 entities:
   - entity: binary_sensor.kitchen_presence
     name: Kitchen
@@ -31,6 +34,10 @@ Options:
 - `refresh_interval`: Optional. Seconds between history API refreshes. Defaults to `300`.
 - `show_legend`: Optional. Set to `false` to hide the state legend.
 - `state_colors`: Optional. Global state-to-color map.
+- `state_labels`: Optional. Global raw-state-to-label map.
 - `entities[].state_colors`: Optional. Per-entity state-to-color map. This overrides the global map for that entity.
+- `entities[].state_labels`: Optional. Per-entity raw-state-to-label map. This overrides the global map for that entity.
 
-The card also accepts `colors` as an alias for `state_colors`.
+The card also accepts `colors` as an alias for `state_colors` and `labels` as an alias for `state_labels`.
+
+Long enough state segments are labeled inline. Hovering a segment shows the state, start time, stop time, and duration.
