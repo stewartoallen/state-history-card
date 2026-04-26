@@ -31,16 +31,18 @@ class StateHistoryCard extends HTMLElement {
     this._lastStateSignature = "";
     this._activeTooltipSegment = undefined;
     this._tooltipPinned = false;
+    this._pendingTooltipTap = undefined;
     this._labelPressTimer = undefined;
     this._labelLongPressed = false;
     this._labelPressTarget = undefined;
     this._handleDocumentPointerDown = (event) => {
       if (!event.composedPath().includes(this)) this._hideTooltip();
     };
+    this._handleWindowScroll = () => this._hideTooltip();
     this.shadowRoot.addEventListener("pointermove", (event) => this._handlePointerMove(event));
     this.shadowRoot.addEventListener("pointerdown", (event) => this._handlePointerDown(event));
-    this.shadowRoot.addEventListener("pointerup", () => this._clearLabelPress(!this._labelLongPressed));
-    this.shadowRoot.addEventListener("pointercancel", () => this._clearLabelPress(!this._labelLongPressed));
+    this.shadowRoot.addEventListener("pointerup", (event) => this._handlePointerUp(event));
+    this.shadowRoot.addEventListener("pointercancel", () => this._handlePointerCancel());
     this.shadowRoot.addEventListener("click", (event) => this._handleClick(event));
     this.shadowRoot.addEventListener("keydown", (event) => this._handleKeyDown(event));
     this.shadowRoot.addEventListener("pointerleave", () => {
@@ -50,6 +52,7 @@ class StateHistoryCard extends HTMLElement {
 
   disconnectedCallback() {
     document.removeEventListener("pointerdown", this._handleDocumentPointerDown);
+    window.removeEventListener("scroll", this._handleWindowScroll, true);
     this._clearLabelPress();
     if (this._labelFrame) cancelAnimationFrame(this._labelFrame);
   }
@@ -708,6 +711,7 @@ class StateHistoryCard extends HTMLElement {
     const labelMode = this._labelMode();
     const axisTicks = labelMode === "on" ? this._axisTicks(startMs, endMs) : [];
     const showStateLabels = this._stateLabelsVisible();
+    const layout = this._layoutMetrics();
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -778,8 +782,8 @@ class StateHistoryCard extends HTMLElement {
 
         .row {
           display: grid;
-          grid-template-columns: minmax(72px, 18%) minmax(0, 1fr);
-          gap: 8px;
+          grid-template-columns: var(--entity-label-width) minmax(0, 1fr);
+          gap: var(--entity-label-gap);
           align-items: center;
         }
 
@@ -907,8 +911,8 @@ class StateHistoryCard extends HTMLElement {
 
         .axis {
           display: grid;
-          grid-template-columns: minmax(72px, 18%) minmax(0, 1fr);
-          gap: 8px;
+          grid-template-columns: var(--entity-label-width) minmax(0, 1fr);
+          gap: var(--entity-label-gap);
           align-items: start;
           margin-top: 2px;
           color: var(--secondary-text-color);
@@ -984,8 +988,7 @@ class StateHistoryCard extends HTMLElement {
 
           .row,
           .axis {
-            grid-template-columns: 68px minmax(0, 1fr);
-            gap: 6px;
+            gap: var(--entity-label-gap);
           }
 
           .name {
@@ -993,7 +996,7 @@ class StateHistoryCard extends HTMLElement {
           }
         }
       </style>
-      <ha-card>
+      <ha-card style="--entity-label-width:${layout.labelWidth}px;--entity-label-gap:${layout.gap}px">
         ${
           this._config.title
             ? `<div class="header" data-position="${this._escapeAttr(
@@ -1377,16 +1380,83 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _estimatedAxisWidth() {
+    return this._layoutMetrics().axisWidth;
+  }
+
+  _layoutMetrics() {
     const cardWidth = this.getBoundingClientRect().width;
-    if (!cardWidth) return 320;
+    if (!cardWidth) {
+      return {
+        axisWidth: 320,
+        gap: 8,
+        labelWidth: this._configuredLabelWidthPx(400) || 72,
+      };
+    }
 
     const compact = cardWidth <= 520;
     const contentPadding = compact ? 24 : 32;
     const gap = compact ? 6 : 8;
     const innerWidth = Math.max(0, cardWidth - contentPadding);
-    const labelWidth = compact ? 68 : Math.max(72, innerWidth * 0.18);
+    const minLabelWidth = compact ? 68 : 72;
+    const configuredLabelWidth = this._configuredLabelWidthPx(innerWidth);
+    const autoLabelWidth = this._autoLabelWidthPx(innerWidth, minLabelWidth);
+    const desiredLabelWidth = configuredLabelWidth || Math.min(240, autoLabelWidth);
+    const maxLabelWidth = Math.max(minLabelWidth, innerWidth - gap - 120);
+    const labelWidth = Math.round(Math.min(maxLabelWidth, Math.max(minLabelWidth, desiredLabelWidth)));
 
-    return Math.max(120, Math.round(innerWidth - labelWidth - gap));
+    return {
+      axisWidth: Math.max(120, Math.round(innerWidth - labelWidth - gap)),
+      gap,
+      labelWidth,
+    };
+  }
+
+  _configuredLabelWidthPx(innerWidth) {
+    const value = this._config?.label_width;
+    if (value === undefined || value === null || value === "" || String(value).trim().toLowerCase() === "auto") {
+      return undefined;
+    }
+
+    if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+
+    const text = String(value).trim();
+    const number = Number(text);
+    if (Number.isFinite(number)) return number;
+
+    const match = text.match(/^(-?\d+(?:\.\d+)?)(px|%|rem|em)$/i);
+    if (!match) return undefined;
+
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount)) return undefined;
+
+    const unit = match[2].toLowerCase();
+    if (unit === "px") return amount;
+    if (unit === "%") return (innerWidth * amount) / 100;
+
+    const rootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    return amount * rootFontSize;
+  }
+
+  _autoLabelWidthPx(innerWidth, minLabelWidth) {
+    const labels = this._entityConfigs()
+      .filter((entry) => entry.entity)
+      .map((entry) => this._displayName(entry));
+    if (!labels.length) return minLabelWidth;
+
+    const measured = labels.reduce((width, label) => Math.max(width, this._measureTextWidth(label)), 0);
+    const defaultWidth = Math.max(minLabelWidth, innerWidth * 0.18);
+    return Math.max(defaultWidth, Math.ceil(measured + 4));
+  }
+
+  _measureTextWidth(value) {
+    if (!this._measureCanvas) this._measureCanvas = document.createElement("canvas");
+
+    const context = this._measureCanvas.getContext("2d");
+    if (!context) return String(value || "").length * 7;
+
+    const style = getComputedStyle(this);
+    context.font = `13px ${style.fontFamily || "sans-serif"}`;
+    return context.measureText(String(value || "")).width;
   }
 
   _scheduleLabelSync() {
@@ -1456,6 +1526,7 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _handlePointerDown(event) {
+    this._pendingTooltipTap = undefined;
     const label = event.target.closest?.(".name[data-more-info]");
     if (label) {
       this._startLabelPress(label);
@@ -1468,6 +1539,16 @@ class StateHistoryCard extends HTMLElement {
       return;
     }
 
+    if (event.pointerType === "touch") {
+      this._pendingTooltipTap = {
+        segment,
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+      };
+      return;
+    }
+
     if (this._tooltipPinned && this._activeTooltipSegment === segment) {
       this._hideTooltip();
       return;
@@ -1475,7 +1556,38 @@ class StateHistoryCard extends HTMLElement {
 
     this._tooltipPinned = true;
     document.addEventListener("pointerdown", this._handleDocumentPointerDown);
+    window.addEventListener("scroll", this._handleWindowScroll, true);
     this._showTooltip(segment, event.clientX, event.clientY);
+  }
+
+  _handlePointerUp(event) {
+    this._clearLabelPress(!this._labelLongPressed);
+
+    const pending = this._pendingTooltipTap;
+    this._pendingTooltipTap = undefined;
+    if (!pending || pending.pointerId !== event.pointerId) return;
+
+    const moved = Math.hypot(event.clientX - pending.x, event.clientY - pending.y);
+    const segment = event.target.closest?.(".segment");
+    if (moved > 8 || segment !== pending.segment) {
+      this._hideTooltip();
+      return;
+    }
+
+    if (this._tooltipPinned && this._activeTooltipSegment === pending.segment) {
+      this._hideTooltip();
+      return;
+    }
+
+    this._tooltipPinned = true;
+    document.addEventListener("pointerdown", this._handleDocumentPointerDown);
+    window.addEventListener("scroll", this._handleWindowScroll, true);
+    this._showTooltip(pending.segment, event.clientX, event.clientY);
+  }
+
+  _handlePointerCancel() {
+    this._pendingTooltipTap = undefined;
+    this._clearLabelPress(!this._labelLongPressed);
   }
 
   _startLabelPress(target) {
@@ -1503,6 +1615,16 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _handlePointerMove(event) {
+    if (this._pendingTooltipTap && this._pendingTooltipTap.pointerId === event.pointerId) {
+      const moved = Math.hypot(event.clientX - this._pendingTooltipTap.x, event.clientY - this._pendingTooltipTap.y);
+      if (moved > 8) {
+        this._pendingTooltipTap = undefined;
+        this._hideTooltip();
+      }
+      return;
+    }
+
+    if (event.pointerType === "touch") return;
     if (this._tooltipPinned) return;
 
     const segment = event.target.closest?.(".segment");
@@ -1551,7 +1673,9 @@ class StateHistoryCard extends HTMLElement {
   _hideTooltip() {
     this._tooltipPinned = false;
     this._activeTooltipSegment = undefined;
+    this._pendingTooltipTap = undefined;
     document.removeEventListener("pointerdown", this._handleDocumentPointerDown);
+    window.removeEventListener("scroll", this._handleWindowScroll, true);
     const tooltip = this.shadowRoot.querySelector(".tooltip");
     if (tooltip) tooltip.dataset.visible = "false";
   }
@@ -1795,6 +1919,10 @@ class StateHistoryCardEditor extends HTMLElement {
               <input data-field="refresh_interval" type="number" min="10" step="10" value="${this._escapeAttr(
                 config.refresh_interval ?? 300
               )}">
+            </label>
+            <label>
+              Label width
+              <input data-field="label_width" value="${this._escapeAttr(config.label_width || "")}" placeholder="Auto">
             </label>
           </div>
         </fieldset>

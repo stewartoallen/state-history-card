@@ -112,6 +112,7 @@ entities:
 | `title_size` | string/number | theme default | CSS font size such as `20px`, `1.1rem`, or a number treated as pixels. |
 | `hours_to_show` | number | `24` | History range in hours. |
 | `refresh_interval` | number | `300` | Seconds between history API refreshes. |
+| `label_width` | string/number | auto | Left entity label column width. Omit for auto-fit, or set a number of pixels, `120px`, `8rem`, or `24%`. |
 | `legend` | string | `on` | `on`, `off`, `left`, `center`, or `right`. `on` and `left` are synonyms. |
 | `timestamps` | string | `on` | Timeline labels: `on` or `off`. Midnight marks show a weekday or date instead of `12:00 AM`. |
 | `state_colors` | object | `{}` | Global state-to-color map. Keys may match raw state, display label, or `|` separated aliases. |
