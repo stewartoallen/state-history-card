@@ -14,6 +14,12 @@ It supports:
 
 This card currently targets discrete state timelines. It is not intended to replace numeric line graphs.
 
+## Screenshots
+
+![HVAC and weather timelines](img-hvac-weather.png)
+
+<img src="img-light-presence.png" alt="Light and presence timelines" width="520">
+
 ## Installation
 
 ### HACS
