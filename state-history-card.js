@@ -689,6 +689,7 @@ class StateHistoryCard extends HTMLElement {
 
         ha-card {
           overflow: visible;
+          position: relative;
         }
 
         .content {
@@ -713,10 +714,21 @@ class StateHistoryCard extends HTMLElement {
         }
 
         .status {
+          position: absolute;
+          top: 8px;
+          right: 12px;
+          z-index: 2;
+          max-width: calc(100% - 24px);
+          box-sizing: border-box;
+          border: 1px solid var(--divider-color);
+          border-radius: 4px;
+          background: var(--mdc-theme-surface, var(--ha-card-background, var(--card-background-color)));
           color: var(--secondary-text-color);
-          font-size: 13px;
-          min-height: 18px;
-          padding: 0 16px 8px;
+          box-shadow: var(--ha-card-box-shadow, 0 3px 10px rgb(0 0 0 / 16%));
+          font-size: 12px;
+          line-height: 1.3;
+          padding: 4px 8px;
+          pointer-events: none;
         }
 
         .status.error {
