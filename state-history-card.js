@@ -6,8 +6,12 @@ class StateHistoryCard extends HTMLElement {
   static getStubConfig() {
     return {
       type: "custom:state-history-card",
-      hours_to_show: 24,
-      entities: [],
+      title: "Title",
+      title_position: "center",
+      timestamps: "on",
+      labels: "",
+      decimals: 0,
+      entities: ["sun.sun"],
     };
   }
 
@@ -2154,5 +2158,7 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "state-history-card",
   name: "State History Card",
+  preview: true,
   description: "History graph replacement with explicit colors per state value.",
+  documentationURL: "https://github.com/stewartoallen/state-history-card",
 });
