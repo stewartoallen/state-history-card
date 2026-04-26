@@ -659,7 +659,31 @@ class StateHistoryCard extends HTMLElement {
       end: endMs,
     });
 
-    return intervals.filter((item) => item.end > item.start);
+    return this._mergeIntervals(entry, intervals.filter((item) => item.end > item.start));
+  }
+
+  _mergeIntervals(entry, intervals) {
+    if (!this._isNumericEntry(entry) || intervals.length < 2) return intervals;
+
+    const merged = [];
+    for (const interval of intervals) {
+      const previous = merged[merged.length - 1];
+      if (previous && this._numericMergeKey(entry, previous.state) === this._numericMergeKey(entry, interval.state)) {
+        previous.end = interval.end;
+        previous.state = interval.state;
+        previous.attributes = interval.attributes;
+        continue;
+      }
+
+      merged.push({ ...interval });
+    }
+
+    return merged;
+  }
+
+  _numericMergeKey(entry, state) {
+    const value = this._numericValueForColor(entry, state);
+    return Number.isFinite(value) ? `value:${value}` : `raw:${String(state)}`;
   }
 
   _render() {
