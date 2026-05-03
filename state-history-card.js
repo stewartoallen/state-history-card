@@ -28,6 +28,7 @@ class StateHistoryCard extends HTMLElement {
     this._axisWidth = 0;
     this._rangeStartMs = undefined;
     this._rangeEndMs = undefined;
+    this._renderedRows = new Map();
     this._lastStateSignature = "";
     this._activeTooltipSegment = undefined;
     this._tooltipPinned = false;
@@ -713,6 +714,7 @@ class StateHistoryCard extends HTMLElement {
         entry,
         intervals: this._intervalsFor(entry, startMs, endMs),
       }));
+    this._renderedRows = new Map(rows.map((row) => [row.entry.entity, row]));
     const states = this._legendStates(rows);
     const legendPosition = this._legendPosition();
     const titlePosition = this._positionValue(this._config.title_position, "left");
@@ -886,6 +888,26 @@ class StateHistoryCard extends HTMLElement {
           visibility: hidden;
         }
 
+        .numeric-label {
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          left: var(--label-left);
+          width: var(--label-width);
+          box-sizing: border-box;
+          overflow: hidden;
+          padding: 0 5px;
+          color: var(--segment-text-color, var(--text-primary-color, #fff));
+          font-size: 11px;
+          font-weight: 500;
+          line-height: var(--state-history-row-height, 18px);
+          text-align: center;
+          text-overflow: ellipsis;
+          text-shadow: var(--segment-text-shadow, 0 1px 1px rgb(0 0 0 / 45%));
+          white-space: nowrap;
+          pointer-events: none;
+        }
+
         .tooltip {
           position: fixed;
           z-index: 1000;
@@ -1044,41 +1066,7 @@ class StateHistoryCard extends HTMLElement {
                           >
                             ${this._escape(this._displayName(entry))}
                           </button>
-                          <div class="track" style="--track-background:${this._escapeAttr(this._trackBackground(entry))}">
-                            ${intervals
-                              .map((interval) => {
-                                const left = ((interval.start - startMs) / spanMs) * 100;
-                                const width = ((interval.end - interval.start) / spanMs) * 100;
-                                const color = this._colorForState(entry, interval.state, interval.attributes);
-                                const textColor = this._textColorForBackground(color);
-                                const label = this._labelForState(entry, interval.state);
-                                const rawLabel = this._rawLabelForState(entry, interval.state);
-                                return `<div
-                                  class="segment"
-                                  tabindex="0"
-                                  data-state="${this._escapeAttr(label)}"
-                                  data-raw-state="${this._escapeAttr(interval.state)}"
-                                  data-raw-label="${this._escapeAttr(rawLabel)}"
-                                  data-start="${this._escapeAttr(this._formatDateTime(interval.start))}"
-                                  data-end="${this._escapeAttr(this._formatDateTime(interval.end))}"
-                                  data-duration="${this._escapeAttr(
-                                    this._formatDuration(interval.end - interval.start)
-                                  )}"
-                                  aria-label="${this._escapeAttr(
-                                    `${label}, ${this._formatDateTime(interval.start)} to ${this._formatDateTime(
-                                      interval.end
-                                    )}, ${this._formatDuration(interval.end - interval.start)}`
-                                  )}"
-                                  style="left:${left}%;width:${width}%;--segment-color:${this._escapeAttr(
-                                    color
-                                  )};--segment-text-color:${this._escapeAttr(textColor.color)};--segment-text-shadow:${this._escapeAttr(
-                                    textColor.shadow
-                                  )}">
-                                  ${showStateLabels ? `<span class="segment-label">${this._escape(label)}</span>` : ""}
-                                </div>`;
-                              })
-                              .join("")}
-                          </div>
+                          ${this._trackHtml(entry, intervals, startMs, spanMs, showStateLabels)}
                         </div>
                       `;
                       }
@@ -1128,6 +1116,94 @@ class StateHistoryCard extends HTMLElement {
       </ha-card>
     `;
     this._scheduleLabelSync();
+  }
+
+  _trackHtml(entry, intervals, startMs, spanMs, showStateLabels) {
+    return this._isNumericEntry(entry)
+      ? this._numericTrackHtml(entry, intervals, startMs, spanMs, showStateLabels)
+      : this._discreteTrackHtml(entry, intervals, startMs, spanMs, showStateLabels);
+  }
+
+  _discreteTrackHtml(entry, intervals, startMs, spanMs, showStateLabels) {
+    return `<div class="track" style="--track-background:${this._escapeAttr(this._trackBackground(entry))}">
+      ${intervals
+        .map((interval) => {
+          const left = ((interval.start - startMs) / spanMs) * 100;
+          const width = ((interval.end - interval.start) / spanMs) * 100;
+          const color = this._colorForState(entry, interval.state, interval.attributes);
+          const textColor = this._textColorForBackground(color);
+          const label = this._labelForState(entry, interval.state);
+          const rawLabel = this._rawLabelForState(entry, interval.state);
+          return `<div
+            class="segment"
+            tabindex="0"
+            data-state="${this._escapeAttr(label)}"
+            data-raw-state="${this._escapeAttr(interval.state)}"
+            data-raw-label="${this._escapeAttr(rawLabel)}"
+            data-start-ms="${interval.start}"
+            data-end-ms="${interval.end}"
+            aria-label="${this._escapeAttr(
+              `${label}, ${this._formatDateTime(interval.start)} to ${this._formatDateTime(interval.end)}, ${this._formatDuration(
+                interval.end - interval.start
+              )}`
+            )}"
+            style="left:${left}%;width:${width}%;--segment-color:${this._escapeAttr(
+              color
+            )};--segment-text-color:${this._escapeAttr(textColor.color)};--segment-text-shadow:${this._escapeAttr(textColor.shadow)}">
+            ${showStateLabels ? `<span class="segment-label">${this._escape(label)}</span>` : ""}
+          </div>`;
+        })
+        .join("")}
+    </div>`;
+  }
+
+  _numericTrackHtml(entry, intervals, startMs, spanMs, showStateLabels) {
+    const background = this._numericGradient(entry, intervals, startMs, spanMs);
+    return `<div
+      class="track"
+      data-numeric="true"
+      data-entity-id="${this._escapeAttr(entry.entity)}"
+      data-start-ms="${startMs}"
+      data-end-ms="${startMs + spanMs}"
+      style="--track-background:${this._escapeAttr(this._trackBackground(entry))};background:${this._escapeAttr(background)}"
+    >
+      ${showStateLabels ? this._numericLabelsHtml(entry, intervals, startMs, spanMs) : ""}
+    </div>`;
+  }
+
+  _numericGradient(entry, intervals, startMs, spanMs) {
+    if (!intervals.length) return "var(--track-background)";
+
+    const stops = intervals.flatMap((interval) => {
+      const left = Math.max(0, Math.min(100, ((interval.start - startMs) / spanMs) * 100));
+      const right = Math.max(left, Math.min(100, ((interval.end - startMs) / spanMs) * 100));
+      const color = this._colorForState(entry, interval.state, interval.attributes);
+      return [`${color} ${left}%`, `${color} ${right}%`];
+    });
+
+    return `repeating-linear-gradient(90deg, transparent 0, transparent calc(25% - 1px), var(--divider-color) calc(25% - 1px), var(--divider-color) 25%), linear-gradient(90deg, ${stops.join(", ")}), var(--track-background)`;
+  }
+
+  _numericLabelsHtml(entry, intervals, startMs, spanMs) {
+    const widthPx = this._axisWidth || 320;
+    return intervals
+      .map((interval) => {
+        const left = ((interval.start - startMs) / spanMs) * 100;
+        const width = ((interval.end - interval.start) / spanMs) * 100;
+        const label = this._labelForState(entry, interval.state);
+        const availableWidth = (widthPx * width) / 100 - 8;
+        if (availableWidth <= 0 || this._measureTextWidth(label, 11) > availableWidth) return "";
+
+        const color = this._colorForState(entry, interval.state, interval.attributes);
+        const textColor = this._textColorForBackground(color);
+        return `<span
+          class="numeric-label"
+          style="--label-left:${left}%;--label-width:${width}%;--segment-text-color:${this._escapeAttr(
+            textColor.color
+          )};--segment-text-shadow:${this._escapeAttr(textColor.shadow)}"
+        >${this._escape(label)}</span>`;
+      })
+      .join("");
   }
 
   _legendPosition() {
@@ -1457,14 +1533,14 @@ class StateHistoryCard extends HTMLElement {
     return Math.max(defaultWidth, Math.ceil(measured + 4));
   }
 
-  _measureTextWidth(value) {
+  _measureTextWidth(value, fontSize = 13) {
     if (!this._measureCanvas) this._measureCanvas = document.createElement("canvas");
 
     const context = this._measureCanvas.getContext("2d");
     if (!context) return String(value || "").length * 7;
 
     const style = getComputedStyle(this);
-    context.font = `13px ${style.fontFamily || "sans-serif"}`;
+    context.font = `${fontSize}px ${style.fontFamily || "sans-serif"}`;
     return context.measureText(String(value || "")).width;
   }
 
@@ -1542,15 +1618,15 @@ class StateHistoryCard extends HTMLElement {
       return;
     }
 
-    const segment = event.target.closest?.(".segment");
-    if (!segment) {
+    const tooltipTarget = this._tooltipTarget(event.target);
+    if (!tooltipTarget) {
       this._hideTooltip();
       return;
     }
 
     if (event.pointerType === "touch") {
       this._pendingTooltipTap = {
-        segment,
+        target: tooltipTarget,
         pointerId: event.pointerId,
         x: event.clientX,
         y: event.clientY,
@@ -1558,7 +1634,7 @@ class StateHistoryCard extends HTMLElement {
       return;
     }
 
-    if (this._tooltipPinned && this._activeTooltipSegment === segment) {
+    if (this._tooltipPinned && this._activeTooltipSegment === tooltipTarget) {
       this._hideTooltip();
       return;
     }
@@ -1566,7 +1642,7 @@ class StateHistoryCard extends HTMLElement {
     this._tooltipPinned = true;
     document.addEventListener("pointerdown", this._handleDocumentPointerDown);
     window.addEventListener("scroll", this._handleWindowScroll, true);
-    this._showTooltip(segment, event.clientX, event.clientY);
+    this._showTooltip(tooltipTarget, event.clientX, event.clientY);
   }
 
   _handlePointerUp(event) {
@@ -1577,13 +1653,13 @@ class StateHistoryCard extends HTMLElement {
     if (!pending || pending.pointerId !== event.pointerId) return;
 
     const moved = Math.hypot(event.clientX - pending.x, event.clientY - pending.y);
-    const segment = event.target.closest?.(".segment");
-    if (moved > 8 || segment !== pending.segment) {
+    const tooltipTarget = this._tooltipTarget(event.target);
+    if (moved > 8 || tooltipTarget !== pending.target) {
       this._hideTooltip();
       return;
     }
 
-    if (this._tooltipPinned && this._activeTooltipSegment === pending.segment) {
+    if (this._tooltipPinned && this._activeTooltipSegment === pending.target) {
       this._hideTooltip();
       return;
     }
@@ -1591,7 +1667,7 @@ class StateHistoryCard extends HTMLElement {
     this._tooltipPinned = true;
     document.addEventListener("pointerdown", this._handleDocumentPointerDown);
     window.addEventListener("scroll", this._handleWindowScroll, true);
-    this._showTooltip(pending.segment, event.clientX, event.clientY);
+    this._showTooltip(pending.target, event.clientX, event.clientY);
   }
 
   _handlePointerCancel() {
@@ -1636,29 +1712,39 @@ class StateHistoryCard extends HTMLElement {
     if (event.pointerType === "touch") return;
     if (this._tooltipPinned) return;
 
-    const segment = event.target.closest?.(".segment");
-    if (!segment) {
+    const tooltipTarget = this._tooltipTarget(event.target);
+    if (!tooltipTarget) {
       this._hideTooltip();
       return;
     }
 
-    this._showTooltip(segment, event.clientX, event.clientY);
+    this._showTooltip(tooltipTarget, event.clientX, event.clientY);
   }
 
-  _showTooltip(segment, clientX, clientY) {
+  _tooltipTarget(target) {
+    return target.closest?.(".segment") || target.closest?.('.track[data-numeric="true"]');
+  }
+
+  _showTooltip(target, clientX, clientY) {
     const tooltip = this.shadowRoot.querySelector(".tooltip");
     if (!tooltip) return;
 
-    this._activeTooltipSegment = segment;
-    const rawRow = segment.dataset.rawLabel
-      ? `<div class="tooltip-row"><span>Raw</span><span>${this._escape(segment.dataset.rawLabel)}</span></div>`
+    const data = this._tooltipData(target, clientX);
+    if (!data) {
+      this._hideTooltip();
+      return;
+    }
+
+    this._activeTooltipSegment = target;
+    const rawRow = data.rawLabel
+      ? `<div class="tooltip-row"><span>Raw</span><span>${this._escape(data.rawLabel)}</span></div>`
       : "";
     tooltip.innerHTML = `
-      <div class="tooltip-state">${this._escape(segment.dataset.state || "")}</div>
+      <div class="tooltip-state">${this._escape(data.state || "")}</div>
       ${rawRow}
-      <div class="tooltip-row"><span>Start</span><span>${this._escape(segment.dataset.start || "")}</span></div>
-      <div class="tooltip-row"><span>Stop</span><span>${this._escape(segment.dataset.end || "")}</span></div>
-      <div class="tooltip-row"><span>Duration</span><span>${this._escape(segment.dataset.duration || "")}</span></div>
+      <div class="tooltip-row"><span>Start</span><span>${this._escape(this._formatDateTime(data.start))}</span></div>
+      <div class="tooltip-row"><span>Stop</span><span>${this._escape(this._formatDateTime(data.end))}</span></div>
+      <div class="tooltip-row"><span>Duration</span><span>${this._escape(this._formatDuration(data.end - data.start))}</span></div>
     `;
     tooltip.dataset.visible = "true";
 
@@ -1677,6 +1763,63 @@ class StateHistoryCard extends HTMLElement {
 
     tooltip.style.left = `${Math.max(margin, left)}px`;
     tooltip.style.top = `${Math.max(margin, top)}px`;
+  }
+
+  _tooltipData(target, clientX) {
+    if (target.classList?.contains("segment")) {
+      return {
+        state: target.dataset.state || "",
+        rawLabel: target.dataset.rawLabel || "",
+        start: Number(target.dataset.startMs),
+        end: Number(target.dataset.endMs),
+      };
+    }
+
+    if (target.dataset?.numeric === "true") {
+      const interval = this._numericIntervalAt(target, clientX);
+      if (!interval) return undefined;
+
+      const row = this._renderedRows.get(target.dataset.entityId);
+      if (!row) return undefined;
+
+      return {
+        state: this._labelForState(row.entry, interval.state),
+        rawLabel: this._rawLabelForState(row.entry, interval.state),
+        start: interval.start,
+        end: interval.end,
+      };
+    }
+
+    return undefined;
+  }
+
+  _numericIntervalAt(track, clientX) {
+    const row = this._renderedRows.get(track.dataset.entityId);
+    if (!row?.intervals?.length) return undefined;
+
+    const startMs = Number(track.dataset.startMs);
+    const endMs = Number(track.dataset.endMs);
+    const rect = track.getBoundingClientRect();
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || rect.width <= 0) return undefined;
+
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const time = startMs + ratio * (endMs - startMs);
+    let low = 0;
+    let high = row.intervals.length - 1;
+
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const interval = row.intervals[middle];
+      if (time < interval.start) {
+        high = middle - 1;
+      } else if (time > interval.end) {
+        low = middle + 1;
+      } else {
+        return interval;
+      }
+    }
+
+    return row.intervals[Math.min(row.intervals.length - 1, Math.max(0, low))];
   }
 
   _hideTooltip() {
