@@ -462,7 +462,8 @@ class StateHistoryCard extends HTMLElement {
     if (!Number.isFinite(value)) return String(state);
 
     const decimals = this._decimals(entry);
-    return decimals === undefined ? String(state) : value.toFixed(decimals);
+    if (decimals !== undefined) return value.toFixed(decimals);
+    return this._numericScale(entry) === 1 ? String(state) : String(value);
   }
 
   _rawLabelForState(entry, state) {
@@ -473,7 +474,7 @@ class StateHistoryCard extends HTMLElement {
     const raw = String(state ?? "").trim();
     if (!raw || ["unknown", "unavailable", "none", "null", "nan"].includes(raw.toLowerCase())) return NaN;
 
-    const value = Number(raw);
+    const value = Number(raw) * this._numericScale(entry);
     if (!Number.isFinite(value)) return NaN;
 
     const decimals = this._decimals(entry);
@@ -489,6 +490,14 @@ class StateHistoryCard extends HTMLElement {
 
     const decimals = Number(value);
     return Number.isFinite(decimals) ? Math.max(0, Math.min(10, Math.round(decimals))) : undefined;
+  }
+
+  _numericScale(entry) {
+    const value = entry.scale ?? entry.factor ?? this._config.scale ?? this._config.factor;
+    if (value === undefined || value === null || value === "") return 1;
+
+    const scale = Number(value);
+    return Number.isFinite(scale) ? scale : 1;
   }
 
   _hasColorStops(stops) {
@@ -1923,6 +1932,10 @@ class StateHistoryCardEditor extends HTMLElement {
             <label>
               Label width
               <input data-field="label_width" value="${this._escapeAttr(config.label_width || "")}" placeholder="Auto">
+            </label>
+            <label>
+              Scale
+              <input data-field="scale" type="number" step="any" value="${this._escapeAttr(config.scale ?? "")}" placeholder="1">
             </label>
           </div>
         </fieldset>
