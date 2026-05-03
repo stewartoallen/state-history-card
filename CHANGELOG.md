@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.2
+
+- Adds global `scale` support for numeric rows.
+- Adds per-entity `scale` overrides.
+- Applies `scale` before `decimals`.
+- Uses scaled values for numeric color selection, visible numeric labels, and numeric segment merging.
+- Keeps the raw unscaled value visible in hover details.
+- Accepts `factor` as an alias for `scale`.
+- Adds a global Scale field to the visual editor.
+- Documents `scale` and `entities[].scale` in the README.
+
 ## 0.1.1
 
 - Improves mobile touch behavior for history popups. Swiping across a graph no longer opens a sticky popup, and active popups dismiss when the page scrolls.
