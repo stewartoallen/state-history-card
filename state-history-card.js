@@ -24,6 +24,8 @@ class StateHistoryCard extends HTMLElement {
     this._loading = false;
     this._error = "";
     this._lastFetchKey = "";
+    this._historyFetchSignature = "";
+    this._loadedEndMs = undefined;
     this._labelFrame = undefined;
     this._axisWidth = 0;
     this._rangeStartMs = undefined;
@@ -76,6 +78,8 @@ class StateHistoryCard extends HTMLElement {
       ...config,
     };
     this._lastFetchKey = "";
+    this._historyFetchSignature = "";
+    this._loadedEndMs = undefined;
     this._rangeStartMs = undefined;
     this._rangeEndMs = undefined;
     this._lastStateSignature = "";
@@ -167,15 +171,25 @@ class StateHistoryCard extends HTMLElement {
     const entityIds = this._entityIds();
     if (entityIds.length === 0) return;
 
-    this._loading = true;
-    this._error = "";
-    this._render();
-
     const end = new Date();
     end.setSeconds(0, 0);
-    const start = new Date(end.getTime() - this._config.hours_to_show * 60 * 60 * 1000);
-    this._rangeStartMs = start.getTime();
-    this._rangeEndMs = end.getTime();
+    const endMs = end.getTime();
+    const startMs = endMs - this._config.hours_to_show * 60 * 60 * 1000;
+    const signature = [entityIds.join(","), this._config.hours_to_show].join("|");
+    const fullFetch =
+      signature !== this._historyFetchSignature ||
+      !Number.isFinite(this._loadedEndMs) ||
+      this._loadedEndMs < startMs;
+    const overlapMs = 2 * 60 * 1000;
+    const fetchStartMs = fullFetch ? startMs : Math.max(startMs, this._loadedEndMs - overlapMs);
+    const fetchStart = new Date(fetchStartMs);
+
+    this._loading = fullFetch;
+    this._error = "";
+    this._rangeStartMs = startMs;
+    this._rangeEndMs = endMs;
+    if (fullFetch) this._render();
+
     const params = new URLSearchParams({
       filter_entity_id: entityIds.join(","),
       end_time: end.toISOString(),
@@ -186,14 +200,19 @@ class StateHistoryCard extends HTMLElement {
     try {
       const response = await this._hass.callApi(
         "GET",
-        `history/period/${encodeURIComponent(start.toISOString())}?${params.toString()}`
+        `history/period/${encodeURIComponent(fetchStart.toISOString())}?${params.toString()}`
       );
-      const nextHistory = new Map();
+      const nextHistory = fullFetch ? new Map() : new Map(this._history);
 
       for (const series of response || []) {
         if (!series.length) continue;
-        const entityId = series[0].entity_id;
-        nextHistory.set(entityId, series);
+        const entityId = this._seriesEntityId(series, entityIds);
+        if (!entityId) continue;
+
+        nextHistory.set(
+          entityId,
+          fullFetch ? this._prunedHistorySeries(series, startMs) : this._mergedHistorySeries(nextHistory.get(entityId), series, startMs)
+        );
       }
 
       for (const entityId of entityIds) {
@@ -202,7 +221,18 @@ class StateHistoryCard extends HTMLElement {
         }
       }
 
+      for (const entityId of [...nextHistory.keys()]) {
+        if (!entityIds.includes(entityId)) {
+          nextHistory.delete(entityId);
+          continue;
+        }
+
+        nextHistory.set(entityId, this._prunedHistorySeries(nextHistory.get(entityId), startMs));
+      }
+
       this._history = nextHistory;
+      this._historyFetchSignature = signature;
+      this._loadedEndMs = endMs;
       this._lastStateSignature = this._stateSignature();
     } catch (err) {
       this._error = err?.message || String(err);
@@ -210,6 +240,46 @@ class StateHistoryCard extends HTMLElement {
       this._loading = false;
       this._render();
     }
+  }
+
+  _seriesEntityId(series, entityIds) {
+    const explicit = series.find((item) => item?.entity_id)?.entity_id;
+    if (explicit) return explicit;
+
+    if (entityIds.length === 1) return entityIds[0];
+    return undefined;
+  }
+
+  _mergedHistorySeries(existing = [], incoming = [], startMs = 0) {
+    return this._prunedHistorySeries([...(existing || []), ...(incoming || [])], startMs);
+  }
+
+  _prunedHistorySeries(series = [], startMs = 0) {
+    const byKey = new Map();
+    for (const point of series || []) {
+      const changed = this._stateChangedMs(point);
+      if (!Number.isFinite(changed)) continue;
+
+      byKey.set(`${changed}|${point.state ?? ""}`, point);
+    }
+
+    const sorted = [...byKey.values()].sort((a, b) => this._stateChangedMs(a) - this._stateChangedMs(b));
+    let previous;
+    const kept = [];
+    for (const point of sorted) {
+      const changed = this._stateChangedMs(point);
+      if (changed <= startMs) {
+        previous = point;
+      } else {
+        kept.push(point);
+      }
+    }
+
+    return previous ? [previous, ...kept] : kept;
+  }
+
+  _stateChangedMs(stateObj) {
+    return Date.parse(stateObj?.last_changed || stateObj?.last_updated);
   }
 
   _displayName(entry) {
