@@ -41,6 +41,9 @@ class StateHistoryCard extends HTMLElement {
     this._handleDocumentPointerDown = (event) => {
       if (!event.composedPath().includes(this)) this._hideTooltip();
     };
+    this._handleDocumentPointerMove = (event) => {
+      if (!this._tooltipPinned && !event.composedPath().includes(this)) this._hideTooltip();
+    };
     this._handleWindowScroll = () => this._hideTooltip();
     this.shadowRoot.addEventListener("pointermove", (event) => this._handlePointerMove(event));
     this.shadowRoot.addEventListener("pointerdown", (event) => this._handlePointerDown(event));
@@ -55,6 +58,7 @@ class StateHistoryCard extends HTMLElement {
 
   disconnectedCallback() {
     document.removeEventListener("pointerdown", this._handleDocumentPointerDown);
+    document.removeEventListener("pointermove", this._handleDocumentPointerMove);
     window.removeEventListener("scroll", this._handleWindowScroll, true);
     this._clearLabelPress();
     if (this._labelFrame) cancelAnimationFrame(this._labelFrame);
@@ -966,13 +970,13 @@ class StateHistoryCard extends HTMLElement {
           width: var(--label-width);
           box-sizing: border-box;
           overflow: hidden;
-          padding: 0 5px;
+          padding: 0 2px;
           color: var(--segment-text-color, var(--text-primary-color, #fff));
           font-size: 11px;
           font-weight: 500;
           line-height: var(--state-history-row-height, 18px);
           text-align: center;
-          text-overflow: ellipsis;
+          text-overflow: clip;
           text-shadow: var(--segment-text-shadow, 0 1px 1px rgb(0 0 0 / 45%));
           white-space: nowrap;
           pointer-events: none;
@@ -1220,7 +1224,7 @@ class StateHistoryCard extends HTMLElement {
             style="left:${left}%;width:${width}%;--segment-color:${this._escapeAttr(
               color
             )};--segment-text-color:${this._escapeAttr(textColor.color)};--segment-text-shadow:${this._escapeAttr(textColor.shadow)}">
-            ${showStateLabels ? `<span class="segment-label">${this._escape(label)}</span>` : ""}
+            ${showStateLabels ? `<span class="segment-label" data-hidden="true">${this._escape(label)}</span>` : ""}
           </div>`;
         })
         .join("")}
@@ -1261,8 +1265,8 @@ class StateHistoryCard extends HTMLElement {
         const left = ((interval.start - startMs) / spanMs) * 100;
         const width = ((interval.end - interval.start) / spanMs) * 100;
         const label = this._labelForState(entry, interval.state);
-        const availableWidth = (widthPx * width) / 100 - 8;
-        if (availableWidth <= 0 || this._measureTextWidth(label, 11) > availableWidth) return "";
+        const availableWidth = (widthPx * width) / 100;
+        if (availableWidth < Math.ceil(this._measureTextWidth(label, 11, 500)) + 4) return "";
 
         const color = this._colorForState(entry, interval.state, interval.attributes);
         const textColor = this._textColorForBackground(color);
@@ -1603,14 +1607,14 @@ class StateHistoryCard extends HTMLElement {
     return Math.max(defaultWidth, Math.ceil(measured + 4));
   }
 
-  _measureTextWidth(value, fontSize = 13) {
+  _measureTextWidth(value, fontSize = 13, fontWeight = 400) {
     if (!this._measureCanvas) this._measureCanvas = document.createElement("canvas");
 
     const context = this._measureCanvas.getContext("2d");
     if (!context) return String(value || "").length * 7;
 
     const style = getComputedStyle(this);
-    context.font = `${fontSize}px ${style.fontFamily || "sans-serif"}`;
+    context.font = `${fontWeight} ${fontSize}px ${style.fontFamily || "sans-serif"}`;
     return context.measureText(String(value || "")).width;
   }
 
@@ -1643,7 +1647,6 @@ class StateHistoryCard extends HTMLElement {
   _syncSegmentLabels() {
     const labels = this.shadowRoot.querySelectorAll(".segment-label");
     for (const label of labels) {
-      label.dataset.hidden = "false";
       const segment = label.closest(".segment");
       const availableWidth = Math.max(0, segment.clientWidth - 8);
       label.dataset.hidden = label.scrollWidth > availableWidth ? "true" : "false";
@@ -1817,6 +1820,7 @@ class StateHistoryCard extends HTMLElement {
       <div class="tooltip-row"><span>Duration</span><span>${this._escape(this._formatDuration(data.end - data.start))}</span></div>
     `;
     tooltip.dataset.visible = "true";
+    document.addEventListener("pointermove", this._handleDocumentPointerMove);
 
     const margin = 12;
     const offset = 14;
@@ -1897,6 +1901,7 @@ class StateHistoryCard extends HTMLElement {
     this._activeTooltipSegment = undefined;
     this._pendingTooltipTap = undefined;
     document.removeEventListener("pointerdown", this._handleDocumentPointerDown);
+    document.removeEventListener("pointermove", this._handleDocumentPointerMove);
     window.removeEventListener("scroll", this._handleWindowScroll, true);
     const tooltip = this.shadowRoot.querySelector(".tooltip");
     if (tooltip) tooltip.dataset.visible = "false";
