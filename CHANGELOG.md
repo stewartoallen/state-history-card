@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.3
+
+- Improves performance for dense numeric history rows by rendering them as a single gradient-backed track instead of one DOM element per segment.
+- Preserves numeric row hover/touch details with pointer hit-testing against cached intervals.
+- Keeps inline numeric labels for wide enough runs without rendering segment elements for every sample.
+- Formats tooltip start, stop, and duration values lazily when the tooltip opens.
+- Adds delta history fetching after the initial full load, reducing refresh-time API/database work.
+- Merges, deduplicates, and prunes cached history while retaining the last state before the visible range.
+- Avoids showing the loading overlay for routine delta refreshes.
+
 ## 0.1.2
 
 - Adds global `scale` support for numeric rows.
