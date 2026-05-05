@@ -69,6 +69,7 @@ class StateHistoryCard extends HTMLElement {
       throw new Error("entities is required");
     }
 
+    const previousHistoryConfigSignature = this._historyConfigSignature(this._config);
     this._config = {
       hours_to_show: 24,
       refresh_interval: 300,
@@ -81,11 +82,14 @@ class StateHistoryCard extends HTMLElement {
       state_labels: {},
       ...config,
     };
-    this._lastFetchKey = "";
-    this._historyFetchSignature = "";
-    this._loadedEndMs = undefined;
-    this._rangeStartMs = undefined;
-    this._rangeEndMs = undefined;
+    const historyConfigSignature = this._historyConfigSignature(this._config);
+    if (previousHistoryConfigSignature !== historyConfigSignature) {
+      this._lastFetchKey = "";
+      this._historyFetchSignature = "";
+      this._loadedEndMs = undefined;
+      this._rangeStartMs = undefined;
+      this._rangeEndMs = undefined;
+    }
     this._lastStateSignature = "";
     this._render();
   }
@@ -137,6 +141,18 @@ class StateHistoryCard extends HTMLElement {
 
   _entityIds() {
     return this._entityConfigs().map((entry) => entry.entity).filter(Boolean);
+  }
+
+  _historyConfigSignature(config) {
+    if (!config) return "";
+
+    const entities = (config.entities || [])
+      .map((entry) => (typeof entry === "string" ? entry : entry?.entity))
+      .filter(Boolean);
+    return JSON.stringify({
+      entities,
+      hours_to_show: config.hours_to_show ?? 24,
+    });
   }
 
   _stateSignature() {
@@ -983,7 +999,7 @@ class StateHistoryCard extends HTMLElement {
         }
 
         .tooltip {
-          position: fixed;
+          position: absolute;
           z-index: 1000;
           display: none;
           max-width: min(320px, calc(100vw - 24px));
@@ -1824,19 +1840,27 @@ class StateHistoryCard extends HTMLElement {
 
     const margin = 12;
     const offset = 14;
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
     const rect = tooltip.getBoundingClientRect();
     let left = clientX + offset;
     let top = clientY + offset;
 
-    if (left + rect.width + margin > window.innerWidth) {
+    if (left + rect.width + margin > viewportWidth) {
       left = clientX - rect.width - offset;
     }
-    if (top + rect.height + margin > window.innerHeight) {
+    if (top + rect.height + margin > viewportHeight) {
       top = clientY - rect.height - offset;
     }
 
-    tooltip.style.left = `${Math.max(margin, left)}px`;
-    tooltip.style.top = `${Math.max(margin, top)}px`;
+    left = Math.min(viewportWidth - rect.width - margin, Math.max(margin, left));
+    top = Math.min(viewportHeight - rect.height - margin, Math.max(margin, top));
+
+    const hostRect = this.getBoundingClientRect();
+    const localLeft = left - hostRect.left;
+    const localTop = top - hostRect.top;
+    tooltip.style.left = `${localLeft}px`;
+    tooltip.style.top = `${localTop}px`;
   }
 
   _tooltipData(target, clientX) {
