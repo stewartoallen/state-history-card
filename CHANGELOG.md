@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.5
+
+- Adds recorder statistics support for eligible bucketed numeric rows.
+- Uses Home Assistant 5-minute statistics for `bucket_minutes: 5`, `15`, and `30` when available.
+- Uses Home Assistant hourly statistics for `bucket_minutes: 60` when available.
+- Falls back to raw history automatically when recorder statistics are unavailable.
+- Defaults `recorder` to `true`; set `recorder: false` globally or per entity to force raw history.
+- Adds a global Recorder statistics control to the visual editor.
+- Documents recorder statistics behavior and defaults in the README.
+- Gates load/render benchmark console logging behind `ENABLE_BENCHMARK_LOGS`, disabled by default.
+
 ## 0.1.4
 
 - Adds `bucket_minutes` for numeric rows, with global and per-entity support.
