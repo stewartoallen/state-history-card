@@ -830,7 +830,7 @@ class StateHistoryCard extends HTMLElement {
 
     const scale = this._numericScale(entry);
     const state = String(scale === 0 ? weightedTotal / totalDuration : (weightedTotal / totalDuration) / scale);
-    const rawLabel = rawDuration > 0 ? String(rawTotal / rawDuration) : state;
+    const rawLabel = rawDuration > 0 ? this._formatBucketRawValue(entry, rawTotal / rawDuration) : state;
     return {
       state,
       rawLabel,
@@ -854,6 +854,15 @@ class StateHistoryCard extends HTMLElement {
 
     const minutes = Number(value);
     return Number.isFinite(minutes) ? Math.max(0, minutes) : 0;
+  }
+
+  _formatBucketRawValue(entry, value) {
+    if (!Number.isFinite(value)) return String(value);
+
+    const decimals = this._decimals(entry);
+    if (decimals !== undefined) return value.toFixed(decimals);
+
+    return String(Math.round(value * 1000) / 1000);
   }
 
   _mergeIntervals(entry, intervals) {
