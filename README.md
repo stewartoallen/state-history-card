@@ -120,11 +120,13 @@ entities:
 | `color_source` | string | `state` | Global color source for clickable label underlines. Use `light` to use live light attributes when available. |
 | `color_stops` | object | none | Global numeric value-to-color stops. Entity-level `color_stops` override this. |
 | `null_color` | string | theme background | Color for numeric rows when a value is missing, invalid, or the row has no data. |
+| `bucket_minutes` | number | `0` | Global numeric row averaging bucket size in minutes. `0` disables bucketing. Bucket boundaries align to the top of each hour. |
 | `scale` | number | `1` | Global multiplier for numeric color calculation, displayed numeric labels, and numeric segment merging. Applied before `decimals`. Does not affect the raw value shown in hover details. |
 | `decimals` | number | none | Global decimal places for numeric color calculation and display labels. Raw values remain visible in hover details. |
 | `entities[].mode` | string | `state` | Set to `numeric` to color numeric sensor history from `color_stops`. |
 | `entities[].color_stops` | object | none | Numeric value-to-color stops. Overrides global `color_stops`. |
 | `entities[].null_color` | string | global/theme background | Per-entity color for missing or invalid numeric values. |
+| `entities[].bucket_minutes` | number | global/`0` | Per-entity numeric averaging bucket size in minutes. Bucket boundaries align to the top of each hour. |
 | `entities[].scale` | number | global/`1` | Per-entity multiplier for numeric color calculation, displayed numeric labels, and numeric segment merging. Applied before `decimals`. |
 | `entities[].decimals` | number | global/none | Per-entity decimal places for numeric color calculation and display labels. |
 | `entities[].label_action` | object/string | auto | Set to `toggle` or `{ action: toggle }` to make the left entity label toggle the entity. Set to `off` to disable. |

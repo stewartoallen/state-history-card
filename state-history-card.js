@@ -561,11 +561,15 @@ class StateHistoryCard extends HTMLElement {
     return this._isNumericEntry(entry) ? String(state) : "";
   }
 
+  _rawLabelForInterval(entry, interval) {
+    return this._isNumericEntry(entry) ? String(interval.rawLabel ?? interval.state) : "";
+  }
+
   _numericValueForColor(entry, state) {
     const raw = String(state ?? "").trim();
     if (!raw || ["unknown", "unavailable", "none", "null", "nan"].includes(raw.toLowerCase())) return NaN;
 
-    const value = Number(raw) * this._numericScale(entry);
+    const value = this._numericScaledValue(entry, state);
     if (!Number.isFinite(value)) return NaN;
 
     const decimals = this._decimals(entry);
@@ -589,6 +593,14 @@ class StateHistoryCard extends HTMLElement {
 
     const scale = Number(value);
     return Number.isFinite(scale) ? scale : 1;
+  }
+
+  _numericScaledValue(entry, state) {
+    const raw = String(state ?? "").trim();
+    if (!raw || ["unknown", "unavailable", "none", "null", "nan"].includes(raw.toLowerCase())) return NaN;
+
+    const value = Number(raw);
+    return Number.isFinite(value) ? value * this._numericScale(entry) : NaN;
   }
 
   _hasColorStops(stops) {
@@ -762,7 +774,86 @@ class StateHistoryCard extends HTMLElement {
       end: endMs,
     });
 
-    return this._mergeIntervals(entry, intervals.filter((item) => item.end > item.start));
+    const visibleIntervals = intervals.filter((item) => item.end > item.start);
+    const bucketedIntervals = this._bucketNumericIntervals(entry, visibleIntervals, startMs, endMs);
+    return this._mergeIntervals(entry, bucketedIntervals);
+  }
+
+  _bucketNumericIntervals(entry, intervals, startMs, endMs) {
+    const bucketMinutes = this._bucketMinutes(entry);
+    if (!this._isNumericEntry(entry) || bucketMinutes <= 0 || intervals.length < 2) return intervals;
+
+    const bucketMs = bucketMinutes * 60 * 1000;
+    const buckets = [];
+    let bucketStart = this._bucketStartMs(startMs, bucketMs);
+
+    while (bucketStart < endMs) {
+      const bucketEnd = Math.min(endMs, bucketStart + bucketMs);
+      const bucket = this._numericBucketInterval(entry, intervals, Math.max(startMs, bucketStart), bucketEnd);
+      if (bucket) buckets.push(bucket);
+      bucketStart += bucketMs;
+    }
+
+    return buckets;
+  }
+
+  _numericBucketInterval(entry, intervals, start, end) {
+    let weightedTotal = 0;
+    let totalDuration = 0;
+    let rawTotal = 0;
+    let rawDuration = 0;
+    let attributes = {};
+
+    for (const interval of intervals) {
+      if (interval.end <= start || interval.start >= end) continue;
+
+      const overlapStart = Math.max(start, interval.start);
+      const overlapEnd = Math.min(end, interval.end);
+      const duration = overlapEnd - overlapStart;
+      if (duration <= 0) continue;
+
+      const value = this._numericScaledValue(entry, interval.state);
+      if (Number.isFinite(value)) {
+        weightedTotal += value * duration;
+        totalDuration += duration;
+        attributes = interval.attributes || attributes;
+      }
+
+      const rawValue = Number(String(interval.state ?? "").trim());
+      if (Number.isFinite(rawValue)) {
+        rawTotal += rawValue * duration;
+        rawDuration += duration;
+      }
+    }
+
+    if (totalDuration <= 0) return undefined;
+
+    const scale = this._numericScale(entry);
+    const state = String(scale === 0 ? weightedTotal / totalDuration : (weightedTotal / totalDuration) / scale);
+    const rawLabel = rawDuration > 0 ? String(rawTotal / rawDuration) : state;
+    return {
+      state,
+      rawLabel,
+      attributes,
+      start,
+      end,
+    };
+  }
+
+  _bucketStartMs(value, bucketMs) {
+    const date = new Date(value);
+    date.setMinutes(0, 0, 0);
+    const hourStart = date.getTime();
+    const offset = Math.floor((value - hourStart) / bucketMs) * bucketMs;
+    return hourStart + offset;
+  }
+
+  _bucketMinutes(entry) {
+    const value = entry.bucket_minutes ?? this._config.bucket_minutes;
+    if (value === undefined || value === null || value === "") return 0;
+
+    const minutes = Number(value);
+    return Number.isFinite(minutes) ? Math.max(0, minutes) : 0;
   }
 
   _mergeIntervals(entry, intervals) {
@@ -1223,7 +1314,7 @@ class StateHistoryCard extends HTMLElement {
           const color = this._colorForState(entry, interval.state, interval.attributes);
           const textColor = this._textColorForBackground(color);
           const label = this._labelForState(entry, interval.state);
-          const rawLabel = this._rawLabelForState(entry, interval.state);
+          const rawLabel = this._rawLabelForInterval(entry, interval);
           return `<div
             class="segment"
             tabindex="0"
@@ -1882,7 +1973,7 @@ class StateHistoryCard extends HTMLElement {
 
       return {
         state: this._labelForState(row.entry, interval.state),
-        rawLabel: this._rawLabelForState(row.entry, interval.state),
+        rawLabel: this._rawLabelForInterval(row.entry, interval),
         start: interval.start,
         end: interval.end,
       };
@@ -2169,6 +2260,12 @@ class StateHistoryCardEditor extends HTMLElement {
               Refresh interval
               <input data-field="refresh_interval" type="number" min="10" step="10" value="${this._escapeAttr(
                 config.refresh_interval ?? 300
+              )}">
+            </label>
+            <label>
+              Bucket minutes
+              <input data-field="bucket_minutes" type="number" min="0" step="1" value="${this._escapeAttr(
+                config.bucket_minutes ?? 0
               )}">
             </label>
             <label>
