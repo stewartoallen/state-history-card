@@ -1,3 +1,5 @@
+const ENABLE_BENCHMARK_LOGS = false;
+
 class StateHistoryCard extends HTMLElement {
   static getConfigElement() {
     return document.createElement("state-history-card-editor");
@@ -78,7 +80,7 @@ class StateHistoryCard extends HTMLElement {
       title_position: "left",
       title_size: undefined,
       show_legend: true,
-      recorder: false,
+      recorder: true,
       state_colors: {},
       state_labels: {},
       ...config,
@@ -2165,6 +2167,8 @@ class StateHistoryCard extends HTMLElement {
   }
 
   _logBenchmark(event, data = {}) {
+    if (!ENABLE_BENCHMARK_LOGS) return;
+
     const label = this._config?.title || this._entityIds().slice(0, 3).join(",") || "untitled";
     const rounded = Object.fromEntries(
       Object.entries(data).map(([key, value]) => [key, typeof value === "number" ? Math.round(value * 10) / 10 : value])
@@ -2421,8 +2425,8 @@ class StateHistoryCardEditor extends HTMLElement {
             <label>
               Recorder statistics
               <select data-field="recorder">
-                ${this._option("", "Off", config.recorder === true ? "on" : "")}
-                ${this._option("on", "On", config.recorder === true ? "on" : "")}
+                ${this._option("on", "On", config.recorder === false ? "" : "on")}
+                ${this._option("", "Off", config.recorder === false ? "" : "on")}
               </select>
             </label>
             <label>
@@ -2563,8 +2567,8 @@ class StateHistoryCardEditor extends HTMLElement {
     const config = { ...this._config };
 
     if (field === "recorder") {
-      if (value === "" || value === "off") delete config.recorder;
-      else config.recorder = true;
+      if (value === "" || value === "off") config.recorder = false;
+      else delete config.recorder;
     } else if (value === "" && field !== "title") {
       delete config[field];
     } else if (field === "title" && value === "") {
