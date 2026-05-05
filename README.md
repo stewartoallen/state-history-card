@@ -1,6 +1,6 @@
 # State History Card
 
-State History Card is a Home Assistant Lovelace card for discrete state history. It is aimed at timelines such as presence, motion, door/window, device tracker, and template sensors where the native history graph is close but you need explicit colors per state value.
+State History Card is a Home Assistant Lovelace card for state timelines. It is aimed at timelines such as presence, motion, door/window, device tracker, template sensors, lights, switches, and compact numeric sensors where the native history graph is close but you need explicit state colors, numeric color bands, or denser timeline presentation.
 
 It supports:
 
@@ -10,9 +10,11 @@ It supports:
 - Hover details with state, start, stop, and duration.
 - Timeline labels: `on` or `off`.
 - Configurable title and legend alignment.
-- A visual editor for common options, entity rows, and global state color/label maps.
+- Numeric color stops with optional scaling, rounding, bucketing, and recorder statistics.
+- Clickable left labels for toggle-capable entities, with long press/click for more-info.
+- A visual editor for common options, entity rows, global state color/label maps, and global numeric color stops.
 
-This card currently targets discrete state timelines. It is not intended to replace numeric line graphs.
+Numeric rows are rendered as compact color timelines rather than line graphs. They are best for dense comparison views such as zone temperatures, air quality, power, or other values where color bands are more useful than exact plotted curves.
 
 ## Screenshots
 
@@ -87,6 +89,7 @@ hours_to_show: 24
 refresh_interval: 300
 legend: on
 timestamps: on
+labels: ""
 state_colors:
   "on|Home": "#22c55e"
   "off|Away": "#64748b"
@@ -210,6 +213,7 @@ color_stops:
   82: "#dc2626"
 null_color: "#3f3f46"
 decimals: 1
+bucket_minutes: 5
 entities:
   - entity: sensor.office_temperature
     name: Office temp
@@ -222,11 +226,16 @@ entities:
       72: "#22c55e"
       84: "#dc2626"
     decimals: 0
+    recorder: false
 ```
 
 Numeric rows are omitted from the discrete state legend.
 
-When global `color_stops` are configured, `sensor`, `number`, and `input_number` entities that look numeric use the stops automatically. Use `mode: state` to force a sensor to use discrete state colors.
+When global `color_stops` are configured, `sensor`, `number`, and `input_number` entities that look numeric use the stops automatically. Use `mode: state` to force a sensor to use discrete state colors. Use `mode: numeric` to force numeric handling for another entity.
+
+`scale` is applied before `decimals`. Scaled and rounded values are used for color selection, visible numeric labels, and numeric segment merging. Hover details keep a raw value; bucketed raw values are formatted with `decimals` when configured, or a compact fallback precision.
+
+`bucket_minutes` reduces dense numeric history into duration-weighted averages. Buckets align to the top of each hour, so a 5-minute bucket always starts at `HH:00`, `HH:05`, `HH:10`, and so on. `bucket_minutes: 0` disables bucketing.
 
 With `bucket_minutes` configured, the card prefers Home Assistant recorder statistics for eligible numeric sensors by default. `bucket_minutes: 5`, `15`, and `30` use 5-minute statistics when available; `bucket_minutes: 60` uses hourly statistics. The card falls back to raw history when statistics are unavailable. Set `recorder: false` to force raw history.
 
@@ -248,7 +257,7 @@ Set `color_source: light` globally if most label underlines should use live ligh
 
 ## Visual Editor
 
-The visual editor supports the common card options, entity rows, global state color/label maps, and global numeric color stops. Advanced per-entity `state_colors`, `state_labels`, and `color_stops` remain available through the raw YAML editor.
+The visual editor supports the common card options, entity rows, global state color/label maps, and global numeric color stops. Advanced per-entity `state_colors`, `state_labels`, `color_stops`, `bucket_minutes`, `recorder`, `scale`, `decimals`, `label_action`, and `more_info_entity` remain available through the raw YAML editor.
 
 ## Development
 
@@ -265,3 +274,5 @@ For local Home Assistant testing, update the dashboard resource URL with a cache
 ```
 
 Then hard-refresh the Home Assistant browser tab.
+
+For crude local timing diagnostics, set `ENABLE_BENCHMARK_LOGS` to `true` at the top of `state-history-card.js`. The card logs load and render timing with a `[state-history-card]` prefix.
