@@ -78,6 +78,7 @@ class StateHistoryCard extends HTMLElement {
       title_position: "left",
       title_size: undefined,
       show_legend: true,
+      recorder: false,
       state_colors: {},
       state_labels: {},
       ...config,
@@ -152,6 +153,16 @@ class StateHistoryCard extends HTMLElement {
     return JSON.stringify({
       entities,
       hours_to_show: config.hours_to_show ?? 24,
+      recorder: config.recorder === true,
+      bucket_minutes: config.bucket_minutes ?? 0,
+      entity_buckets: (config.entities || []).map((entry) =>
+        typeof entry === "string"
+          ? ""
+          : `${entry?.entity || ""}:${entry?.mode ?? ""}:${entry?.bucket_minutes ?? ""}:${entry?.recorder ?? ""}:${
+              entry?.color_stops ? "stops" : ""
+            }`
+      ),
+      global_color_stops: config.color_stops ? "stops" : "",
     });
   }
 
@@ -188,6 +199,7 @@ class StateHistoryCard extends HTMLElement {
   async _fetchHistory() {
     if (!this._hass || !this._config) return;
 
+    const loadStart = performance.now();
     const entityIds = this._entityIds();
     if (entityIds.length === 0) return;
 
@@ -217,25 +229,52 @@ class StateHistoryCard extends HTMLElement {
     params.set("minimal_response", "");
     params.set("no_attributes", "");
 
+    let historyMs = 0;
+    let recorderMs = 0;
+    let historyEntities = 0;
+    let recorderEntities = 0;
+    let historyPoints = 0;
+    let recorderPoints = 0;
+
     try {
-      const response = await this._hass.callApi(
-        "GET",
-        `history/period/${encodeURIComponent(fetchStart.toISOString())}?${params.toString()}`
-      );
       const nextHistory = fullFetch ? new Map() : new Map(this._history);
+      const recorderStart = performance.now();
+      const recorderHistory = await this._fetchRecorderHistory(startMs, endMs);
+      recorderMs = performance.now() - recorderStart;
+      const historyFetchEntityIds = entityIds.filter((entityId) => !recorderHistory.has(entityId));
+
+      for (const [entityId, series] of recorderHistory.entries()) {
+        nextHistory.set(entityId, series);
+        recorderEntities += 1;
+        recorderPoints += series.length;
+      }
+
+      let response = [];
+      if (historyFetchEntityIds.length > 0) {
+        const historyStart = performance.now();
+        const historyParams = new URLSearchParams(params);
+        historyParams.set("filter_entity_id", historyFetchEntityIds.join(","));
+        response = await this._hass.callApi(
+          "GET",
+          `history/period/${encodeURIComponent(fetchStart.toISOString())}?${historyParams.toString()}`
+        );
+        historyMs = performance.now() - historyStart;
+      }
 
       for (const series of response || []) {
         if (!series.length) continue;
-        const entityId = this._seriesEntityId(series, entityIds);
+        const entityId = this._seriesEntityId(series, historyFetchEntityIds);
         if (!entityId) continue;
 
         nextHistory.set(
           entityId,
           fullFetch ? this._prunedHistorySeries(series, startMs) : this._mergedHistorySeries(nextHistory.get(entityId), series, startMs)
         );
+        historyEntities += 1;
+        historyPoints += series.length;
       }
 
-      for (const entityId of entityIds) {
+      for (const entityId of historyFetchEntityIds) {
         if (!nextHistory.has(entityId) && this._hass.states[entityId]) {
           nextHistory.set(entityId, [this._hass.states[entityId]]);
         }
@@ -259,7 +298,83 @@ class StateHistoryCard extends HTMLElement {
     } finally {
       this._loading = false;
       this._render();
+      this._logBenchmark("load", {
+        total_ms: performance.now() - loadStart,
+        history_ms: historyMs,
+        recorder_ms: recorderMs,
+        full: fullFetch,
+        history_entities: historyEntities,
+        recorder_entities: recorderEntities,
+        history_points: historyPoints,
+        recorder_points: recorderPoints,
+      });
     }
+  }
+
+  async _fetchRecorderHistory(startMs, endMs) {
+    if (!this._hass?.callWS) return new Map();
+
+    const candidates = this._entityConfigs().filter((entry) => {
+      const bucketMinutes = this._bucketMinutes(entry);
+      return entry.entity && this._isNumericEntry(entry) && this._recorderEnabled(entry) && this._recorderPeriod(bucketMinutes);
+    });
+    if (candidates.length === 0) return new Map();
+
+    const byPeriod = new Map();
+    for (const entry of candidates) {
+      const period = this._recorderPeriod(this._bucketMinutes(entry));
+      if (!byPeriod.has(period)) byPeriod.set(period, []);
+      byPeriod.get(period).push(entry);
+    }
+
+    const history = new Map();
+    for (const [period, entries] of byPeriod.entries()) {
+      let result;
+      try {
+        result = await this._hass.callWS({
+          type: "recorder/statistics_during_period",
+          start_time: new Date(startMs).toISOString(),
+          end_time: new Date(endMs).toISOString(),
+          statistic_ids: entries.map((entry) => entry.entity),
+          period,
+          types: ["mean"],
+        });
+      } catch (err) {
+        console.warn("[state-history-card] recorder statistics unavailable; falling back to history", err);
+        continue;
+      }
+
+      for (const entry of entries) {
+        const series = this._statisticsSeriesToHistory(entry.entity, result?.[entry.entity], startMs, endMs);
+        if (series.length > 0) history.set(entry.entity, series);
+      }
+    }
+
+    return history;
+  }
+
+  _statisticsSeriesToHistory(entityId, statistics = [], startMs = 0, endMs = 0) {
+    return (statistics || [])
+      .map((point) => {
+        const changed = this._statisticsTimeMs(point.start);
+        const state = Number(point.mean);
+        if (!Number.isFinite(changed) || !Number.isFinite(state) || changed < startMs || changed > endMs) return undefined;
+
+        return {
+          entity_id: entityId,
+          state: String(state),
+          last_changed: new Date(changed).toISOString(),
+          last_updated: new Date(changed).toISOString(),
+          __source: "recorder",
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => this._stateChangedMs(a) - this._stateChangedMs(b));
+  }
+
+  _statisticsTimeMs(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : Date.parse(value);
   }
 
   _seriesEntityId(series, entityIds) {
@@ -727,12 +842,14 @@ class StateHistoryCard extends HTMLElement {
         state: item.state,
         changed: Date.parse(item.last_changed || item.last_updated),
         attributes: item.attributes || {},
+        source: item.__source || "",
       }))
       .filter((item) => item.state !== undefined && Number.isFinite(item.changed))
       .sort((a, b) => a.changed - b.changed);
 
     const current = this._hass?.states?.[entry.entity];
-    if (current) {
+    const fromRecorder = points.some((point) => point.source === "recorder");
+    if (current && !fromRecorder) {
       const currentChanged = Date.parse(current.last_changed || current.last_updated);
       const lastPoint = points[points.length - 1];
       if (
@@ -856,6 +973,16 @@ class StateHistoryCard extends HTMLElement {
     return Number.isFinite(minutes) ? Math.max(0, minutes) : 0;
   }
 
+  _recorderEnabled(entry) {
+    return (entry?.recorder ?? this._config?.recorder) === true;
+  }
+
+  _recorderPeriod(bucketMinutes) {
+    if (bucketMinutes === 60) return "hour";
+    if (bucketMinutes > 0 && bucketMinutes < 60 && bucketMinutes % 5 === 0) return "5minute";
+    return "";
+  }
+
   _formatBucketRawValue(entry, value) {
     if (!Number.isFinite(value)) return String(value);
 
@@ -892,6 +1019,7 @@ class StateHistoryCard extends HTMLElement {
   _render() {
     if (!this._config) return;
 
+    const renderStart = performance.now();
     this._axisWidth = this._estimatedAxisWidth();
 
     const fallbackEndMs = this._roundedNowMs();
@@ -1306,6 +1434,11 @@ class StateHistoryCard extends HTMLElement {
       </ha-card>
     `;
     this._scheduleLabelSync();
+    this._logBenchmark("render", {
+      total_ms: performance.now() - renderStart,
+      rows: rows.length,
+      intervals: rows.reduce((total, row) => total + row.intervals.length, 0),
+    });
   }
 
   _trackHtml(entry, intervals, startMs, spanMs, showStateLabels) {
@@ -2031,6 +2164,14 @@ class StateHistoryCard extends HTMLElement {
     if (tooltip) tooltip.dataset.visible = "false";
   }
 
+  _logBenchmark(event, data = {}) {
+    const label = this._config?.title || this._entityIds().slice(0, 3).join(",") || "untitled";
+    const rounded = Object.fromEntries(
+      Object.entries(data).map(([key, value]) => [key, typeof value === "number" ? Math.round(value * 10) / 10 : value])
+    );
+    console.log("[state-history-card]", event, label, rounded);
+  }
+
   _escape(value) {
     return String(value)
       .replaceAll("&", "&amp;")
@@ -2278,6 +2419,13 @@ class StateHistoryCardEditor extends HTMLElement {
               )}">
             </label>
             <label>
+              Recorder statistics
+              <select data-field="recorder">
+                ${this._option("", "Off", config.recorder === true ? "on" : "")}
+                ${this._option("on", "On", config.recorder === true ? "on" : "")}
+              </select>
+            </label>
+            <label>
               Label width
               <input data-field="label_width" value="${this._escapeAttr(config.label_width || "")}" placeholder="Auto">
             </label>
@@ -2414,7 +2562,10 @@ class StateHistoryCardEditor extends HTMLElement {
   _updateField(field, value, type, debounce = false) {
     const config = { ...this._config };
 
-    if (value === "" && field !== "title") {
+    if (field === "recorder") {
+      if (value === "" || value === "off") delete config.recorder;
+      else config.recorder = true;
+    } else if (value === "" && field !== "title") {
       delete config[field];
     } else if (field === "title" && value === "") {
       delete config.title;

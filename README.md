@@ -121,12 +121,14 @@ entities:
 | `color_stops` | object | none | Global numeric value-to-color stops. Entity-level `color_stops` override this. |
 | `null_color` | string | theme background | Color for numeric rows when a value is missing, invalid, or the row has no data. |
 | `bucket_minutes` | number | `0` | Global numeric row averaging bucket size in minutes. `0` disables bucketing. Bucket boundaries align to the top of each hour. |
+| `recorder` | boolean | `false` | Use Home Assistant recorder statistics for eligible numeric rows when `bucket_minutes` matches a statistics period. Falls back to raw history when statistics are unavailable. |
 | `scale` | number | `1` | Global multiplier for numeric color calculation, displayed numeric labels, and numeric segment merging. Applied before `decimals`. Does not affect the raw value shown in hover details. |
 | `decimals` | number | none | Global decimal places for numeric color calculation and display labels. Raw values remain visible in hover details. |
 | `entities[].mode` | string | `state` | Set to `numeric` to color numeric sensor history from `color_stops`. |
 | `entities[].color_stops` | object | none | Numeric value-to-color stops. Overrides global `color_stops`. |
 | `entities[].null_color` | string | global/theme background | Per-entity color for missing or invalid numeric values. |
 | `entities[].bucket_minutes` | number | global/`0` | Per-entity numeric averaging bucket size in minutes. Bucket boundaries align to the top of each hour. |
+| `entities[].recorder` | boolean | global/`false` | Per-entity override for recorder statistics usage. |
 | `entities[].scale` | number | global/`1` | Per-entity multiplier for numeric color calculation, displayed numeric labels, and numeric segment merging. Applied before `decimals`. |
 | `entities[].decimals` | number | global/none | Per-entity decimal places for numeric color calculation and display labels. |
 | `entities[].label_action` | object/string | auto | Set to `toggle` or `{ action: toggle }` to make the left entity label toggle the entity. Set to `off` to disable. |
@@ -225,6 +227,8 @@ entities:
 Numeric rows are omitted from the discrete state legend.
 
 When global `color_stops` are configured, `sensor`, `number`, and `input_number` entities that look numeric use the stops automatically. Use `mode: state` to force a sensor to use discrete state colors.
+
+Set `recorder: true` with `bucket_minutes` to prefer Home Assistant recorder statistics for eligible numeric sensors. `bucket_minutes: 5`, `15`, and `30` use 5-minute statistics when available; `bucket_minutes: 60` uses hourly statistics. The card falls back to raw history when statistics are unavailable. The card logs lightweight load and render timing to the browser console with a `[state-history-card]` prefix.
 
 ## Light Color Source
 
