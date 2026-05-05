@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.4
+
+- Adds `bucket_minutes` for numeric rows, with global and per-entity support.
+- Averages bucketed numeric values using duration-weighted buckets aligned to the top of each hour.
+- Keeps `bucket_minutes: 0` as the default for unbucketed raw history behavior.
+- Formats bucketed raw hover values with `decimals` when configured, or a compact fallback precision.
+- Fixes bucketed numeric color rendering when `scale` is configured.
+- Preserves cached history during visual editor and raw YAML edits unless the entity list or history range changes.
+- Improves hover cleanup so fast pointer movement does not leave stale popups visible.
+- Adjusts hover positioning for edit-mode layouts and right-edge clipping.
+
 ## 0.1.3
 
 - Improves performance for dense numeric history rows by rendering them as a single gradient-backed track instead of one DOM element per segment.
