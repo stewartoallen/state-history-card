@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6
+
+- Publishes the current card and updated documentation as a new HACS release.
+- Aligns the package version with the release tag.
+
 ## 0.1.5
 
 - Adds recorder statistics support for eligible bucketed numeric rows.

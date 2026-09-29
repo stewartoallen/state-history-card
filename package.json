@@ -1,6 +1,6 @@
 {
   "name": "state-history-card",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "description": "Home Assistant Lovelace state history card with explicit colors per state value.",
   "type": "module",
   "private": true,
